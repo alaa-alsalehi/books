@@ -443,9 +443,8 @@ export class Doc extends Observable<DocValue | Doc[]> {
           const newPath = res?.success ? res?.attachment?.path : undefined;
           if (newPath) {
             if (prevPath) {
-              try {
-                await ipcApi.attachments.delete({ dbPath, path: prevPath });
-              } catch {}
+              // Defer deletion until after a successful sync().
+              this._pendingFsFileDeletes.add(prevPath);
             }
             return { name: v.name, type: v.type, path: newPath };
           }
@@ -485,9 +484,8 @@ export class Doc extends Observable<DocValue | Doc[]> {
         const newPath = res?.success ? res?.attachment?.path : undefined;
         if (newPath) {
           if (prevRef) {
-            try {
-              await ipcApi.attachments.delete({ dbPath, path: prevRef });
-            } catch {}
+            // Defer deletion until after a successful sync().
+            this._pendingFsFileDeletes.add(prevRef);
           }
           return `${ATTACH_IMAGE_FILE_REF_PREFIX}${newPath}`;
         }
@@ -1089,7 +1087,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
 
   _prepareRemovedFilesystemFilesOnSync() {
     const current = this._collectFilesystemFileRefs();
-    const removed = new Set<string>();
+    const removed = new Set<string>(this._pendingFsFileDeletes);
     for (const oldRef of this._fsFileRefSnapshot) {
       if (!current.has(oldRef)) {
         removed.add(oldRef);
