@@ -77,7 +77,6 @@ import {
   getPOSOpeningShiftDoc,
 } from 'src/utils/pos';
 import { POSClosingShift } from 'models/inventory/Point of Sale/POSClosingShift';
-import { ForbiddenError } from 'fyo/utils/errors';
 
 export default defineComponent({
   name: 'ClosePOSShiftModal',
@@ -102,11 +101,6 @@ export default defineComponent({
       posClosingShiftDoc: undefined as POSClosingShift | undefined,
       transactedAmount: {} as Record<string, Money> | undefined,
     };
-  },
-  computed: {
-    isOnline() {
-      return !!navigator.onLine;
-    },
   },
   watch: {
     openModal: {
@@ -213,12 +207,6 @@ export default defineComponent({
     },
     async handleSubmit() {
       try {
-        if (!this.isOnline) {
-          throw new ForbiddenError(
-            t`Device is offline. Please connect to a network to continue.`
-          );
-        }
-
         validateClosingAmounts(this.posClosingShiftDoc as POSClosingShift);
         await this.posClosingShiftDoc?.set('closingDate', new Date());
         await this.posClosingShiftDoc?.set(
