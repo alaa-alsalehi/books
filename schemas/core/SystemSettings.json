@@ -81,6 +81,25 @@
       "section": "Default"
     },
     {
+      "fieldname": "attachmentStorage",
+      "label": "Attachment storage",
+      "fieldtype": "AutoComplete",
+      "options": [
+        {
+          "label": "Database",
+          "value": "database"
+        },
+        {
+          "label": "File system",
+          "value": "filesystem"
+        }
+      ],
+      "default": "database",
+      "required": true,
+      "description": "Store attachments inside the company database file (portable backup), or as separate files in an attachments folder next to the database.",
+      "section": "Default"
+    },
+    {
       "fieldname": "locale",
       "label": "Locale",
       "fieldtype": "AutoComplete",

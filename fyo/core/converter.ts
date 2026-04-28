@@ -439,12 +439,9 @@ function toRawAttachment(value: DocValue, field: Field): null | string {
     return null;
   }
 
-  if (
-    (value as Attachment)?.name &&
-    (value as Attachment)?.data &&
-    (value as Attachment)?.type
-  ) {
-    return JSON.stringify(value);
+  const v = value as Attachment;
+  if (v?.name && v?.type && (typeof v.data === 'string' || typeof v.path === 'string')) {
+    return JSON.stringify(v);
   }
 
   throwError(value, field, 'raw');

@@ -18,7 +18,7 @@
     :title="df?.label"
     :style="imageSizeStyle"
   >
-    <img v-if="value" :src="value" />
+    <img v-if="src" :src="src" />
     <div v-else :class="[!isReadOnly ? 'group-hover:opacity-90' : '']">
       <div
         v-if="letterPlaceholder"
@@ -70,6 +70,11 @@
 <script lang="ts">
 import { Field } from 'schemas/types';
 import { fyo } from 'src/initFyo';
+import {
+  isAttachImageFileRef,
+  getAttachImageFileRefPath,
+  resolveAttachImageSrc,
+} from 'src/utils/attachments';
 import { getDataURL } from 'src/utils/misc';
 import { defineComponent, PropType } from 'vue';
 import FeatherIcon from '../FeatherIcon.vue';
@@ -89,8 +94,13 @@ export default defineComponent({
   extends: Base,
   props: {
     letterPlaceholder: { type: String, default: '' },
-    value: { type: String, default: '' },
+    value: { type: [String, Object] as PropType<any>, default: '' },
     df: { type: Object as PropType<Field> },
+  },
+  data() {
+    return {
+      src: '' as string,
+    };
   },
   computed: {
     imageSizeStyle() {
@@ -103,7 +113,23 @@ export default defineComponent({
       return !!this.value;
     },
   },
+  watch: {
+    value: {
+      immediate: true,
+      handler() {
+        void this.refreshSrc();
+      },
+    },
+  },
   methods: {
+    async refreshSrc() {
+      if (this.value && typeof this.value === 'object' && this.value.data) {
+        this.src = await getDataURL(this.value.type || 'image/png', this.value.data);
+        return;
+      }
+      const resolved = await resolveAttachImageSrc(this.value as string, fyo, 'image/png');
+      this.src = resolved ?? '';
+    },
     async handleClick() {
       if (this.value) {
         return await this.clearImage();
@@ -113,6 +139,7 @@ export default defineComponent({
     async clearImage() {
       // @ts-ignore
       this.triggerChange(null);
+      this.src = '';
     },
     async selectImage() {
       if (this.isReadOnly) {
@@ -128,12 +155,13 @@ export default defineComponent({
       if (!success) {
         return;
       }
-      const extension = name.split('.').at(-1);
-      const type = mime_types[extension];
-      const dataURL = await getDataURL(type, data);
-
+      const extension = name.split('.').at(-1) || 'png';
+      const type = mime_types[extension] || 'image/png';
+      // Persisting to filesystem vs DB is handled at Doc.set() level.
       // @ts-ignore
-      this.triggerChange(dataURL);
+      this.triggerChange({ name, type, data });
+      await this.$nextTick();
+      await this.refreshSrc();
     },
   },
 });

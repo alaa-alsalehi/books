@@ -4,7 +4,28 @@ import type { RawValue } from 'schemas/types';
 import type { AuthDemuxBase } from 'utils/auth/types';
 import type { DatabaseDemuxBase } from 'utils/db/types';
 
-export type Attachment = { name: string; type: string; data: string };
+export type Attachment = {
+  name: string;
+  type: string;
+  /**
+   * Legacy inline attachment data (data URL).
+   * Kept for backwards compatibility with existing databases.
+   */
+  data?: string;
+  /**
+   * Path to attachment on disk.
+   * Prefer storing this over `data` so attachments are not embedded in the DB.
+   *
+   * Can be relative to the database directory.
+   */
+  path?: string;
+  /**
+   * Non-serialized bytes used during upload/update.
+   * The converter may persist these bytes either into `data` (DB)
+   * or into a file and set `path` (filesystem).
+   */
+  bytes?: Uint8Array;
+};
 export type DocValue =
   | string
   | number

@@ -40,6 +40,20 @@ import verifyTokenWithServer, {
   reportIssueToServer,
 } from './subscription';
 
+function sanitizeFilename(name: string) {
+  return name
+    .trim()
+    .replace(/[/\\?%*:|"<>]/g, '-') // reserved on Windows + path separators
+    .replace(/\s+/g, ' ')
+    .slice(0, 180);
+}
+
+function getAttachmentRootForDb(dbPath: string) {
+  const dir = path.dirname(dbPath);
+  const dbBase = path.basename(dbPath, '.books.db');
+  return path.join(dir, 'attachments', dbBase || 'default');
+}
+
 export default function registerIpcMainActionListeners(main: Main) {
   ipcMain.handle(IPC_ACTIONS.CHECK_DB_ACCESS, async (_, filePath: string) => {
     try {
@@ -424,4 +438,106 @@ export default function registerIpcMainActionListeners(main: Main) {
       return databaseManager.getSchemaMap();
     });
   });
+
+  /**
+   * Attachment actions: store attachments as separate files on disk.
+   * We keep only a relative path reference in the DB, so DB stays small.
+   */
+  ipcMain.handle(
+    IPC_ACTIONS.ATTACHMENT_SAVE,
+    async (
+      _,
+      params: { dbPath: string; name: string; type: string; data: unknown }
+    ) => {
+      return await getErrorHandledReponse(async () => {
+        const { dbPath, name, type, data } = params ?? {};
+        if (!dbPath || typeof dbPath !== 'string') {
+          return { success: false, message: 'Missing dbPath' };
+        }
+        if (!name || typeof name !== 'string') {
+          return { success: false, message: 'Missing file name' };
+        }
+        if (!type || typeof type !== 'string') {
+          return { success: false, message: 'Missing file type' };
+        }
+
+        let bytes: Uint8Array | null = null;
+        if (data instanceof Uint8Array) {
+          bytes = data;
+        } else if (Buffer.isBuffer(data)) {
+          bytes = new Uint8Array(data);
+        } else if (data instanceof ArrayBuffer) {
+          bytes = new Uint8Array(data);
+        } else if (ArrayBuffer.isView(data)) {
+          bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        }
+
+        if (!bytes) {
+          return { success: false, message: 'Missing file data' };
+        }
+
+        const root = getAttachmentRootForDb(dbPath);
+        await fs.ensureDir(root);
+
+        const safeName = sanitizeFilename(name) || 'attachment';
+        const stamp = new Date().toISOString().replace(/[-T:.Z]/g, '');
+        const filename = `${stamp}_${safeName}`;
+        const fullPath = path.join(root, filename);
+        await fs.writeFile(fullPath, Buffer.from(bytes));
+
+        const relativePath = path.relative(path.dirname(dbPath), fullPath);
+        return {
+          success: true,
+          attachment: { name: safeName, type, path: relativePath },
+        };
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_ACTIONS.ATTACHMENT_READ,
+    async (_, params: { dbPath: string; path: string }) => {
+      return await getErrorHandledReponse(async () => {
+        const { dbPath, path: relOrAbs } = params ?? {};
+        if (!dbPath || typeof dbPath !== 'string') {
+          return { success: false, message: 'Missing dbPath' };
+        }
+        if (!relOrAbs || typeof relOrAbs !== 'string') {
+          return { success: false, message: 'Missing attachment path' };
+        }
+
+        const fullPath = path.isAbsolute(relOrAbs)
+          ? relOrAbs
+          : path.join(path.dirname(dbPath), relOrAbs);
+        const buf = await fs.readFile(fullPath);
+        return {
+          success: true,
+          name: path.basename(fullPath),
+          type: undefined,
+          data: new Uint8Array(buf),
+        };
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_ACTIONS.ATTACHMENT_DELETE,
+    async (_, params: { dbPath: string; path: string }) => {
+      return await getErrorHandledReponse(async () => {
+        const { dbPath, path: relOrAbs } = params ?? {};
+        if (!dbPath || typeof dbPath !== 'string') {
+          return { success: false, message: 'Missing dbPath' };
+        }
+        if (!relOrAbs || typeof relOrAbs !== 'string') {
+          return { success: false, message: 'Missing attachment path' };
+        }
+
+        const fullPath = path.isAbsolute(relOrAbs)
+          ? relOrAbs
+          : path.join(path.dirname(dbPath), relOrAbs);
+        await fs.remove(fullPath);
+        return { success: true };
+      });
+    }
+  );
 }

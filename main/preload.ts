@@ -133,6 +133,59 @@ const ipc = {
     await ipcRenderer.invoke(IPC_ACTIONS.SAVE_DATA, data, savePath);
   },
 
+  attachments: {
+    async save(params: {
+      dbPath: string;
+      name: string;
+      type: string;
+      data: Uint8Array;
+    }) {
+      const res = (await ipcRenderer.invoke(
+        IPC_ACTIONS.ATTACHMENT_SAVE,
+        params
+      )) as BackendResponse;
+      if (res.error) {
+        return { success: false, message: res.error.message };
+      }
+      return (res.data ?? { success: false }) as {
+        success: boolean;
+        message?: string;
+        attachment?: { name: string; type: string; path: string };
+      };
+    },
+
+    async read(params: { dbPath: string; path: string }) {
+      const res = (await ipcRenderer.invoke(
+        IPC_ACTIONS.ATTACHMENT_READ,
+        params
+      )) as BackendResponse;
+      if (res.error) {
+        return { success: false, message: res.error.message };
+      }
+      return (res.data ?? { success: false }) as {
+        success: boolean;
+        message?: string;
+        name?: string;
+        type?: string;
+        data?: Uint8Array;
+      };
+    },
+
+    async delete(params: { dbPath: string; path: string }) {
+      const res = (await ipcRenderer.invoke(
+        IPC_ACTIONS.ATTACHMENT_DELETE,
+        params
+      )) as BackendResponse;
+      if (res.error) {
+        return { success: false, message: res.error.message };
+      }
+      return (res.data ?? { success: false }) as {
+        success: boolean;
+        message?: string;
+      };
+    },
+  },
+
   showItemInFolder(filePath: string) {
     ipcRenderer.send(IPC_MESSAGES.SHOW_ITEM_IN_FOLDER, filePath);
   },

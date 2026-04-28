@@ -54,6 +54,37 @@ import { DocItem } from 'models/inventory/types';
  */
 const DUPLICATE_STRIP_FIELDS = ['isSyncedWithErp', 'datafromErp'] as const;
 
+const ATTACH_IMAGE_FILE_REF_PREFIX = 'books-file:';
+
+function uint8ArrayToBase64(bytes: Uint8Array) {
+  try {
+    // Browser/Electron renderer
+    // eslint-disable-next-line no-undef
+    if (typeof btoa === 'function') {
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      // eslint-disable-next-line no-undef
+      return btoa(binary);
+    }
+  } catch {}
+
+  // Fallback (Node-like)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const B = (globalThis as any)?.Buffer;
+  if (B) {
+    return B.from(bytes).toString('base64');
+  }
+  return '';
+}
+
+function dataUrlFromBytes(type: string, bytes: Uint8Array) {
+  const base64 = uint8ArrayToBase64(bytes);
+  return `data:${type || 'application/octet-stream'};base64,${base64}`;
+}
+
 export class Doc extends Observable<DocValue | Doc[]> {
   /* eslint-disable @typescript-eslint/no-floating-promises */
   name?: string;
@@ -76,6 +107,14 @@ export class Doc extends Observable<DocValue | Doc[]> {
 
   _syncing = false;
   _addDocToSyncQueue = true;
+
+  /**
+   * Snapshot of filesystem-backed file references as of last load/sync.
+   * Used to delete files only when changes are committed (on sync),
+   * not when the user clears a field but doesn't save.
+   */
+  _fsFileRefSnapshot: Set<string> = new Set();
+  _pendingFsFileDeletes: Set<string> = new Set();
 
   constructor(
     schema: Schema,
@@ -340,6 +379,10 @@ export class Doc extends Observable<DocValue | Doc[]> {
     } else {
       const field = this.fieldMap[fieldname];
       await this._validateField(field, value);
+      value = (await this._normalizeFileFieldValueBeforeSet(
+        field,
+        value
+      )) as DocValue;
       this[fieldname] = value;
     }
 
@@ -352,6 +395,108 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
 
     return true;
+  }
+
+  async _normalizeFileFieldValueBeforeSet(field: Field, value: unknown) {
+    const storage =
+      ((this.fyo.singles.SystemSettings as any)?.attachmentStorage as
+        | 'database'
+        | 'filesystem'
+        | undefined) ?? 'database';
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipcApi = (globalThis as any)?.ipc;
+    const dbPath = (this.fyo.db as any)?.dbPath as string | undefined;
+    const canUseFs =
+      storage === 'filesystem' &&
+      this.fyo.isElectron &&
+      !!dbPath &&
+      ipcApi?.desktop &&
+      typeof ipcApi.attachments?.save === 'function' &&
+      typeof ipcApi.attachments?.delete === 'function';
+
+    if (field.fieldtype === FieldTypeEnum.Attachment) {
+      const v = value as
+        | null
+        | undefined
+        | {
+            name?: string;
+            type?: string;
+            data?: string;
+            path?: string;
+            bytes?: Uint8Array;
+          };
+      if (!v) return value;
+
+      const prev = this.get(field.fieldname) as any;
+      const prevPath = typeof prev?.path === 'string' ? prev.path : null;
+
+      if (v.bytes instanceof Uint8Array && v.name && v.type) {
+        if (canUseFs) {
+          const res = (await ipcApi.attachments.save({
+            dbPath,
+            name: v.name,
+            type: v.type,
+            data: v.bytes,
+          })) as { success?: boolean; attachment?: { path?: string } };
+
+          const newPath = res?.success ? res?.attachment?.path : undefined;
+          if (newPath) {
+            if (prevPath) {
+              try {
+                await ipcApi.attachments.delete({ dbPath, path: prevPath });
+              } catch {}
+            }
+            return { name: v.name, type: v.type, path: newPath };
+          }
+        }
+
+        // DB fallback (or if filesystem save fails): embed into DB.
+        return { name: v.name, type: v.type, data: dataUrlFromBytes(v.type, v.bytes) };
+      }
+
+      return value;
+    }
+
+    if (field.fieldtype === FieldTypeEnum.AttachImage) {
+      if (typeof value === 'string' || value === null) {
+        return value;
+      }
+
+      const v = value as { name?: string; type?: string; data?: Uint8Array };
+      if (!(v?.data instanceof Uint8Array) || !v.type) {
+        return value;
+      }
+
+      const prev = this.get(field.fieldname) as any;
+      const prevRef =
+        typeof prev === 'string' && prev.startsWith(ATTACH_IMAGE_FILE_REF_PREFIX)
+          ? prev.slice(ATTACH_IMAGE_FILE_REF_PREFIX.length)
+          : null;
+
+      if (canUseFs) {
+        const res = (await ipcApi.attachments.save({
+          dbPath,
+          name: v.name || 'image',
+          type: v.type,
+          data: v.data,
+        })) as { success?: boolean; attachment?: { path?: string } };
+
+        const newPath = res?.success ? res?.attachment?.path : undefined;
+        if (newPath) {
+          if (prevRef) {
+            try {
+              await ipcApi.attachments.delete({ dbPath, path: prevRef });
+            } catch {}
+          }
+          return `${ATTACH_IMAGE_FILE_REF_PREFIX}${newPath}`;
+        }
+      }
+
+      return dataUrlFromBytes(v.type, v.data);
+    }
+
+    return value;
   }
 
   async setMultiple(docValueMap: DocValueMap): Promise<boolean> {
@@ -719,6 +864,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
     this._setValuesWithoutChecks(data, false);
     await this._setComputedValuesFromFormulas();
     this._dirty = false;
+    this._fsFileRefSnapshot = this._collectFilesystemFileRefs();
     this.trigger('change', {
       doc: this,
     });
@@ -892,6 +1038,94 @@ export class Doc extends Observable<DocValue | Doc[]> {
     await this._applyFormula();
     await this._validateSync();
     await this.trigger('validate');
+
+    // Prepare commit-time cleanup: identify filesystem-backed files that were
+    // removed/replaced since the last successful load/sync.
+    this._prepareRemovedFilesystemFilesOnSync();
+  }
+
+  _collectFilesystemFileRefs(): Set<string> {
+    const refs = new Set<string>();
+    const scan = (doc: Doc) => {
+      for (const field of doc.schema.fields) {
+        if (field.meta) continue;
+        const value = doc.get(field.fieldname) as unknown;
+
+        if (field.fieldtype === FieldTypeEnum.Attachment) {
+          const v = value as undefined | null | { path?: string };
+          if (v?.path && typeof v.path === 'string') {
+            refs.add(v.path);
+          }
+          continue;
+        }
+
+        if (field.fieldtype === FieldTypeEnum.AttachImage) {
+          const v = value as string | null | undefined;
+          if (
+            typeof v === 'string' &&
+            v.startsWith(ATTACH_IMAGE_FILE_REF_PREFIX) &&
+            v.length > ATTACH_IMAGE_FILE_REF_PREFIX.length
+          ) {
+            refs.add(v.slice(ATTACH_IMAGE_FILE_REF_PREFIX.length));
+          }
+          continue;
+        }
+
+        if (field.fieldtype === FieldTypeEnum.Table) {
+          if (Array.isArray(value)) {
+            for (const row of value) {
+              if (row instanceof Doc) {
+                scan(row);
+              }
+            }
+          }
+        }
+      }
+    };
+
+    scan(this);
+    return refs;
+  }
+
+  _prepareRemovedFilesystemFilesOnSync() {
+    const current = this._collectFilesystemFileRefs();
+    const removed = new Set<string>();
+    for (const oldRef of this._fsFileRefSnapshot) {
+      if (!current.has(oldRef)) {
+        removed.add(oldRef);
+      }
+    }
+    this._pendingFsFileDeletes = removed;
+  }
+
+  async _flushPendingFilesystemDeletesAfterSync() {
+    if (!this._pendingFsFileDeletes.size) {
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipcApi = (globalThis as any)?.ipc;
+    const dbPath = (this.fyo.db as any)?.dbPath as string | undefined;
+    if (!this.fyo.isElectron || !dbPath) {
+      this._pendingFsFileDeletes.clear();
+      return;
+    }
+    if (!ipcApi?.desktop || typeof ipcApi.attachments?.delete !== 'function') {
+      this._pendingFsFileDeletes.clear();
+      return;
+    }
+
+    const paths = Array.from(this._pendingFsFileDeletes);
+    this._pendingFsFileDeletes.clear();
+    await Promise.all(
+      paths.map(async (path) => {
+        try {
+          await ipcApi.attachments.delete({ dbPath, path });
+        } catch {
+          // best-effort
+        }
+      })
+    );
   }
 
   async _insert() {
@@ -956,6 +1190,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
     } else {
       doc = await this._update();
     }
+    await this._flushPendingFilesystemDeletesAfterSync();
     this._notInserted = false;
     await this.trigger('afterSync');
     this.fyo.doc.observer.trigger(`sync:${this.schemaName}`, this.name);
@@ -1008,11 +1243,80 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
 
     await this.trigger('beforeDelete');
+    // Best-effort cleanup for filesystem-backed attachments/images.
+    try {
+      await this.#cleanupFileBackedFieldsBeforeDelete();
+    } catch {}
     await this.fyo.db.delete(this.schemaName, this.name!);
     await this.trigger('afterDelete');
 
     this.fyo.telemetry.log(Verb.Deleted, this.schemaName);
     this.fyo.doc.observer.trigger(`delete:${this.schemaName}`, this.name);
+  }
+
+  static #attachImageFileRefPrefix = 'books-file:';
+
+  async #cleanupFileBackedFieldsBeforeDelete() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipcApi = (globalThis as any)?.ipc;
+    const dbPath = (this.fyo.db as any)?.dbPath as string | undefined;
+    if (!this.fyo.isElectron || !dbPath) {
+      return;
+    }
+    if (!ipcApi?.desktop || typeof ipcApi.attachments?.delete !== 'function') {
+      return;
+    }
+
+    const paths = new Set<string>();
+    const scan = (doc: Doc) => {
+      for (const field of doc.schema.fields) {
+        if (field.meta) continue;
+        const { fieldname, fieldtype } = field;
+        const value = doc.get(fieldname) as unknown;
+
+        if (fieldtype === FieldTypeEnum.Attachment) {
+          const v = value as undefined | null | { path?: string };
+          if (v?.path && typeof v.path === 'string') {
+            paths.add(v.path);
+          }
+          continue;
+        }
+
+        if (fieldtype === FieldTypeEnum.AttachImage) {
+          const v = value as string | null | undefined;
+          if (
+            typeof v === 'string' &&
+            v.startsWith(Doc.#attachImageFileRefPrefix) &&
+            v.length > Doc.#attachImageFileRefPrefix.length
+          ) {
+            paths.add(v.slice(Doc.#attachImageFileRefPrefix.length));
+          }
+          continue;
+        }
+
+        if (fieldtype === FieldTypeEnum.Table) {
+          if (Array.isArray(value)) {
+            for (const row of value) {
+              if (row instanceof Doc) {
+                scan(row);
+              }
+            }
+          }
+        }
+      }
+    };
+
+    scan(this);
+
+    await Promise.all(
+      Array.from(paths).map(async (p) => {
+        try {
+          await ipcApi.attachments.delete({ dbPath, path: p });
+        } catch {
+          // best-effort
+        }
+      })
+    );
   }
 
   async submit() {

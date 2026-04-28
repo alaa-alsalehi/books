@@ -7,6 +7,7 @@ import { getValueMapFromList } from 'utils/index';
 import { TemplateFile } from 'utils/types';
 import { showToast } from './interactive';
 import { PrintValues } from './types';
+import { resolveAttachImageSrc } from './attachments';
 import {
   getDocFromNameIfExistsElseNew,
   getSavePath,
@@ -112,6 +113,16 @@ export async function getPrintTemplatePropValues(
     ...printValues,
     ...accountingValues,
   };
+
+  // If logo is stored as a filesystem reference string, resolve it to a data URL
+  // so print templates can use it in <img :src="...">.
+  const logoValue = (values.print as any)?.logo as string | undefined;
+  if (logoValue) {
+    const resolved = await resolveAttachImageSrc(logoValue, fyo, 'image/png');
+    if (resolved) {
+      (values.print as any).logo = resolved;
+    }
+  }
   const discountSchema = ['Invoice', 'Quote'];
   if (discountSchema.some((value) => doc.schemaName?.endsWith(value))) {
     (values.doc as PrintTemplateData).totalDiscount =

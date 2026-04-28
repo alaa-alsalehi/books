@@ -48,6 +48,10 @@ export enum IPC_ACTIONS {
   DB_CALL = 'db-call',
   DB_BESPOKE = 'db-bespoke',
   DB_SCHEMA = 'db-schema',
+  // Attachment messages (store files on disk, not in DB)
+  ATTACHMENT_SAVE = 'attachment-save',
+  ATTACHMENT_READ = 'attachment-read',
+  ATTACHMENT_DELETE = 'attachment-delete',
 }
 
 // ipcMain.send(...)
