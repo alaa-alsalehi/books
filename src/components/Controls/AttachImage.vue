@@ -88,6 +88,12 @@ const mime_types: Record<string, string> = {
   svg: 'image/svg+xml',
 };
 
+function inferImageMimeTypeFromName(name?: string | null) {
+  const n = (name ?? '').toString();
+  const ext = n.split('.').pop()?.toLowerCase() ?? '';
+  return mime_types[ext] || 'application/octet-stream';
+}
+
 export default defineComponent({
   name: 'AttachImage',
   components: { FeatherIcon },
@@ -124,14 +130,22 @@ export default defineComponent({
   methods: {
     async refreshSrc() {
       if (this.value && typeof this.value === 'object' && this.value.data) {
-        this.src = await getDataURL(this.value.type || 'image/png', this.value.data);
+        const mimeType =
+          typeof this.value.type === 'string' && this.value.type.length
+            ? this.value.type
+            : inferImageMimeTypeFromName(this.value.name);
+        this.src = await getDataURL(mimeType, this.value.data);
         return;
       }
       if (typeof this.value !== 'string') {
         this.src = '';
         return;
       }
-      const resolved = await resolveAttachImageSrc(this.value, fyo, 'image/png');
+
+      const typeHint = isAttachImageFileRef(this.value)
+        ? inferImageMimeTypeFromName(getAttachImageFileRefPath(this.value))
+        : undefined;
+      const resolved = await resolveAttachImageSrc(this.value, fyo, typeHint);
       this.src = resolved ?? '';
     },
     async handleClick() {
@@ -159,8 +173,8 @@ export default defineComponent({
       if (!success) {
         return;
       }
-      const extension = name.split('.').at(-1) || 'png';
-      const type = mime_types[extension] || 'image/png';
+      const extension = (name.split('.').at(-1) || 'png').toLowerCase();
+      const type = mime_types[extension] || inferImageMimeTypeFromName(name);
       // Persisting to filesystem vs DB is handled at Doc.set() level.
       // @ts-ignore
       this.triggerChange({ name, type, data });
