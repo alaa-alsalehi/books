@@ -118,7 +118,11 @@ export async function getPrintTemplatePropValues(
   // so print templates can use it in <img :src="...">.
   const logoValue = (values.print as any)?.logo as string | undefined;
   if (logoValue) {
-    const resolved = await resolveAttachImageSrc(logoValue, fyo, 'image/png');
+    // Detect MIME type from file extension or let resolveAttachImageSrc infer it
+    const mimeType = logoValue.endsWith('.svg') ? 'image/svg+xml' 
+      : logoValue.endsWith('.jpg') || logoValue.endsWith('.jpeg') ? 'image/jpeg'
+      : 'image/png';
+    const resolved = await resolveAttachImageSrc(logoValue, fyo, mimeType);
     if (resolved) {
       (values.print as any).logo = resolved;
     }

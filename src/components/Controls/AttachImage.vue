@@ -127,7 +127,11 @@ export default defineComponent({
         this.src = await getDataURL(this.value.type || 'image/png', this.value.data);
         return;
       }
-      const resolved = await resolveAttachImageSrc(this.value as string, fyo, 'image/png');
+      if (typeof this.value !== 'string') {
+        this.src = '';
+        return;
+      }
+      const resolved = await resolveAttachImageSrc(this.value, fyo, 'image/png');
       this.src = resolved ?? '';
     },
     async handleClick() {
