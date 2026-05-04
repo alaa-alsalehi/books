@@ -14,7 +14,7 @@ import {
   TargetField,
 } from 'schemas/types';
 import { getIsNullOrUndef, getMapFromList, getRandomString } from 'utils';
-import { markRaw, reactive } from 'vue';
+import { markRaw, reactive, toRaw } from 'vue';
 import { isPesa } from '../utils/index';
 import { getDbSyncError } from './errorHelpers';
 import {
@@ -1072,8 +1072,9 @@ export class Doc extends Observable<DocValue | Doc[]> {
         if (field.fieldtype === FieldTypeEnum.Table) {
           if (Array.isArray(value)) {
             for (const row of value) {
-              if (row instanceof Doc) {
-                scan(row);
+              const child = toRaw(row) as Doc;
+              if (child instanceof Doc) {
+                scan(child);
               }
             }
           }
@@ -1295,8 +1296,9 @@ export class Doc extends Observable<DocValue | Doc[]> {
         if (fieldtype === FieldTypeEnum.Table) {
           if (Array.isArray(value)) {
             for (const row of value) {
-              if (row instanceof Doc) {
-                scan(row);
+              const child = toRaw(row) as Doc;
+              if (child instanceof Doc) {
+                scan(child);
               }
             }
           }
