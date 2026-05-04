@@ -184,6 +184,60 @@ const ipc = {
         message?: string;
       };
     },
+
+    async stageSave(params: {
+      dbPath: string;
+      name: string;
+      type: string;
+      data: Uint8Array;
+    }) {
+      const res = (await ipcRenderer.invoke(
+        IPC_ACTIONS.ATTACHMENT_STAGE_SAVE,
+        params
+      )) as BackendResponse;
+      if (res.error) {
+        return { success: false, message: res.error.message };
+      }
+      return (res.data ?? { success: false }) as {
+        success: boolean;
+        message?: string;
+        stagePath?: string;
+        attachment?: {
+          name: string;
+          type: string;
+          stagePath: string;
+        };
+      };
+    },
+
+    async stageCommit(params: { dbPath: string; stagePath: string }) {
+      const res = (await ipcRenderer.invoke(
+        IPC_ACTIONS.ATTACHMENT_STAGE_COMMIT,
+        params
+      )) as BackendResponse;
+      if (res.error) {
+        return { success: false, message: res.error.message };
+      }
+      return (res.data ?? { success: false }) as {
+        success: boolean;
+        message?: string;
+        attachment?: { name: string; path: string };
+      };
+    },
+
+    async stageDelete(params: { stagePath: string }) {
+      const res = (await ipcRenderer.invoke(
+        IPC_ACTIONS.ATTACHMENT_STAGE_DELETE,
+        params
+      )) as BackendResponse;
+      if (res.error) {
+        return { success: false, message: res.error.message };
+      }
+      return (res.data ?? { success: false }) as {
+        success: boolean;
+        message?: string;
+      };
+    },
   },
 
   showItemInFolder(filePath: string) {

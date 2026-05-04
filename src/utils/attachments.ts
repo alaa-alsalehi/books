@@ -1,6 +1,10 @@
 import { Fyo } from 'fyo';
 import { Attachment } from 'fyo/core/types';
 import { getDataURL } from 'src/utils/misc';
+import {
+  decodeBooksStagedPath,
+  isBooksStagedRef,
+} from 'utils/attachmentStagingRef';
 
 const ATTACH_IMAGE_FILE_REF_PREFIX = 'books-file:';
 
@@ -31,9 +35,13 @@ export async function resolveAttachmentDataUrl(
     return null;
   }
 
+  const readPath = isBooksStagedRef(attachment.path)
+    ? decodeBooksStagedPath(attachment.path) ?? attachment.path
+    : attachment.path;
+
   const res = (await ipcApi.attachments.read({
     dbPath,
-    path: attachment.path,
+    path: readPath,
   })) as { success?: boolean; data?: Uint8Array };
 
   if (!res?.success || !res.data) {
@@ -82,6 +90,33 @@ export async function resolveAttachImageSrc(
   }
 
   // Legacy / default: already a data URL.
+  if (isBooksStagedRef(value)) {
+    const abs = decodeBooksStagedPath(value);
+    if (!abs) {
+      return null;
+    }
+    const dbPath = fyo.db?.dbPath;
+    if (!dbPath) {
+      return null;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipcApi = typeof ipc !== 'undefined' ? (ipc as any) : undefined;
+    if (!ipcApi?.desktop || typeof ipcApi.attachments?.read !== 'function') {
+      return null;
+    }
+    const res = (await ipcApi.attachments.read({
+      dbPath,
+      path: abs,
+    })) as { success?: boolean; data?: Uint8Array };
+
+    if (!res?.success || !res.data) {
+      return null;
+    }
+
+    const type = typeHint || 'application/octet-stream';
+    return getDataURL(type, Uint8Array.from(res.data));
+  }
+
   if (!isAttachImageFileRef(value)) {
     return value;
   }

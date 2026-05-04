@@ -52,6 +52,9 @@ export enum IPC_ACTIONS {
   ATTACHMENT_SAVE = 'attachment-save',
   ATTACHMENT_READ = 'attachment-read',
   ATTACHMENT_DELETE = 'attachment-delete',
+  ATTACHMENT_STAGE_SAVE = 'attachment-stage-save',
+  ATTACHMENT_STAGE_COMMIT = 'attachment-stage-commit',
+  ATTACHMENT_STAGE_DELETE = 'attachment-stage-delete',
 }
 
 // ipcMain.send(...)

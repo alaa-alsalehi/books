@@ -725,6 +725,9 @@ export class Doc extends Observable<DocValue | Doc[]> {
   }
 
   async _syncValues(data: DocValueMap) {
+    if (!this._syncing) {
+      await this.attachments.discardStagedOnReload();
+    }
     this._clearValues();
     this._setValuesWithoutChecks(data, false);
     await this._setComputedValuesFromFormulas();
@@ -911,6 +914,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
 
   async _insert() {
     this._setBaseMetaValues();
+    await this.attachments.commitStagedBeforeDbWrite();
     await this._preSync();
     await setName(this, this.fyo);
 
@@ -930,6 +934,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
   async _update() {
     await this._validateDbNotModified();
     this._updateModifiedMetaValues();
+    await this.attachments.commitStagedBeforeDbWrite();
     await this._preSync();
 
     const data = this.getValidDict(false, true);
