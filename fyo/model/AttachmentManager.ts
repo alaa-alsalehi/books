@@ -340,6 +340,72 @@ export class AttachmentManager {
     }
   }
 
+  async #reconcilePreviousAttachmentPath(prevPath: string | null) {
+    if (!prevPath) return;
+    if (isBooksStagedRef(prevPath)) {
+      await this.#deleteStagedPathIfAny(prevPath);
+    } else {
+      this.#pendingDeletes.add(prevPath);
+    }
+  }
+
+  async #reconcilePreviousAttachImage(prevStr: string | null) {
+    if (!prevStr) return;
+    if (isBooksStagedRef(prevStr)) {
+      await this.#deleteStagedPathIfAny(prevStr);
+    } else if (prevStr.startsWith(this.#attachImagePrefix)) {
+      this.#pendingDeletes.add(prevStr.slice(this.#attachImagePrefix.length));
+    }
+  }
+
+  #readStagePathFromResponse(res: {
+    success?: boolean;
+    stagePath?: string;
+    attachment?: { stagePath?: string };
+  }): string | null {
+    if (!res?.success) return null;
+    const s = res.stagePath ?? res.attachment?.stagePath;
+    return typeof s === 'string' && s.length > 0 ? s : null;
+  }
+
+  async #ipcStageSave(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcApi: any,
+    dbPath: string,
+    name: string,
+    type: string,
+    data: Uint8Array
+  ): Promise<string | null> {
+    const res = (await ipcApi.attachments.stageSave({
+      dbPath,
+      name,
+      type,
+      data,
+    })) as {
+      success?: boolean;
+      stagePath?: string;
+      attachment?: { stagePath?: string };
+    };
+    return this.#readStagePathFromResponse(res);
+  }
+
+  async #ipcFinalSave(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcApi: any,
+    dbPath: string,
+    name: string,
+    type: string,
+    data: Uint8Array
+  ): Promise<string | null> {
+    const res = (await ipcApi.attachments.save({
+      dbPath,
+      name,
+      type,
+      data,
+    })) as { success?: boolean; attachment?: { path?: string } };
+    return res?.success && res.attachment?.path ? res.attachment.path : null;
+  }
+
   async normalizeBeforeSet(field: Field, value: unknown): Promise<unknown> {
     const storage = getStorageMode(this.#doc);
 
@@ -379,29 +445,15 @@ export class AttachmentManager {
 
       if (v.bytes instanceof Uint8Array && v.name && v.type) {
         if (canStage) {
-          const res = (await ipcApi.attachments.stageSave({
-            dbPath,
-            name: v.name,
-            type: v.type,
-            data: v.bytes,
-          })) as {
-            success?: boolean;
-            stagePath?: string;
-            attachment?: { stagePath?: string };
-          };
-
-          const stagePath = res?.success
-            ? res.stagePath ?? res.attachment?.stagePath
-            : undefined;
-
-          if (typeof stagePath === 'string' && stagePath.length > 0) {
-            if (prevPath) {
-              if (isBooksStagedRef(prevPath)) {
-                await this.#deleteStagedPathIfAny(prevPath);
-              } else {
-                this.#pendingDeletes.add(prevPath);
-              }
-            }
+          const stagePath = await this.#ipcStageSave(
+            ipcApi,
+            dbPath!,
+            v.name,
+            v.type,
+            v.bytes
+          );
+          if (stagePath) {
+            await this.#reconcilePreviousAttachmentPath(prevPath);
             return {
               name: v.name,
               type: v.type,
@@ -411,22 +463,15 @@ export class AttachmentManager {
         }
 
         if (canUseFs) {
-          const res = (await ipcApi.attachments.save({
-            dbPath,
-            name: v.name,
-            type: v.type,
-            data: v.bytes,
-          })) as { success?: boolean; attachment?: { path?: string } };
-
-          const newPath = res?.success ? res?.attachment?.path : undefined;
+          const newPath = await this.#ipcFinalSave(
+            ipcApi,
+            dbPath!,
+            v.name,
+            v.type,
+            v.bytes
+          );
           if (newPath) {
-            if (prevPath) {
-              if (isBooksStagedRef(prevPath)) {
-                await this.#deleteStagedPathIfAny(prevPath);
-              } else {
-                this.#pendingDeletes.add(prevPath);
-              }
-            }
+            await this.#reconcilePreviousAttachmentPath(prevPath);
             return { name: v.name, type: v.type, path: newPath };
           }
         }
@@ -449,56 +494,32 @@ export class AttachmentManager {
 
       const prev = this.#doc.get(field.fieldname) as any;
       const prevStr = typeof prev === 'string' ? prev : null;
+      const imageName = v.name || 'image';
 
       if (canStage) {
-        const res = (await ipcApi.attachments.stageSave({
-          dbPath,
-          name: v.name || 'image',
-          type: v.type,
-          data: v.data,
-        })) as {
-          success?: boolean;
-          stagePath?: string;
-          attachment?: { stagePath?: string };
-        };
-
-        const stagePath = res?.success
-          ? res.stagePath ?? res.attachment?.stagePath
-          : undefined;
-
-        if (typeof stagePath === 'string' && stagePath.length > 0) {
-          if (prevStr) {
-            if (isBooksStagedRef(prevStr)) {
-              await this.#deleteStagedPathIfAny(prevStr);
-            } else if (prevStr.startsWith(this.#attachImagePrefix)) {
-              this.#pendingDeletes.add(
-                prevStr.slice(this.#attachImagePrefix.length)
-              );
-            }
-          }
+        const stagePath = await this.#ipcStageSave(
+          ipcApi,
+          dbPath!,
+          imageName,
+          v.type,
+          v.data
+        );
+        if (stagePath) {
+          await this.#reconcilePreviousAttachImage(prevStr);
           return encodeBooksStagedPath(stagePath);
         }
       }
 
       if (canUseFs) {
-        const res = (await ipcApi.attachments.save({
-          dbPath,
-          name: v.name || 'image',
-          type: v.type,
-          data: v.data,
-        })) as { success?: boolean; attachment?: { path?: string } };
-
-        const newPath = res?.success ? res?.attachment?.path : undefined;
+        const newPath = await this.#ipcFinalSave(
+          ipcApi,
+          dbPath!,
+          imageName,
+          v.type,
+          v.data
+        );
         if (newPath) {
-          if (prevStr) {
-            if (isBooksStagedRef(prevStr)) {
-              await this.#deleteStagedPathIfAny(prevStr);
-            } else if (prevStr.startsWith(this.#attachImagePrefix)) {
-              this.#pendingDeletes.add(
-                prevStr.slice(this.#attachImagePrefix.length)
-              );
-            }
-          }
+          await this.#reconcilePreviousAttachImage(prevStr);
           return `${this.#attachImagePrefix}${newPath}`;
         }
       }

@@ -69,6 +69,63 @@ function isPathInsideStageRoot(stagePath: string): boolean {
   );
 }
 
+type ParsedAttachmentParams =
+  | { ok: true; dbPath: string; name: string; type: string; bytes: Uint8Array }
+  | { ok: false; message: string };
+
+function normalizeIncomingAttachmentBytes(data: unknown): Uint8Array | null {
+  if (data instanceof Uint8Array) {
+    return data;
+  }
+  if (Buffer.isBuffer(data)) {
+    return new Uint8Array(data);
+  }
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  return null;
+}
+
+function parseAttachmentParams(
+  params:
+    | { dbPath: string; name: string; type: string; data: unknown }
+    | null
+    | undefined
+): ParsedAttachmentParams {
+  const { dbPath, name, type, data } = params ?? {};
+  if (!dbPath || typeof dbPath !== 'string') {
+    return { ok: false, message: 'Missing dbPath' };
+  }
+  if (!name || typeof name !== 'string') {
+    return { ok: false, message: 'Missing file name' };
+  }
+  if (!type || typeof type !== 'string') {
+    return { ok: false, message: 'Missing file type' };
+  }
+  const bytes = normalizeIncomingAttachmentBytes(data);
+  if (!bytes) {
+    return { ok: false, message: 'Missing file data' };
+  }
+  return { ok: true, dbPath, name, type, bytes };
+}
+
+async function writeStampedAttachmentFile(
+  rootDir: string,
+  originalName: string,
+  bytes: Uint8Array
+): Promise<{ fullPath: string; safeName: string }> {
+  await fs.ensureDir(rootDir);
+  const safeName = sanitizeFilename(originalName) || 'attachment';
+  const stamp = new Date().toISOString().replace(/[-T:.Z]/g, '');
+  const filename = `${stamp}_${safeName}`;
+  const fullPath = path.join(rootDir, filename);
+  await fs.writeFile(fullPath, Buffer.from(bytes));
+  return { fullPath, safeName };
+}
+
 export default function registerIpcMainActionListeners(main: Main) {
   ipcMain.handle(IPC_ACTIONS.CHECK_DB_ACCESS, async (_, filePath: string) => {
     try {
@@ -465,40 +522,18 @@ export default function registerIpcMainActionListeners(main: Main) {
       params: { dbPath: string; name: string; type: string; data: unknown }
     ) => {
       return await getErrorHandledReponse(async () => {
-        const { dbPath, name, type, data } = params ?? {};
-        if (!dbPath || typeof dbPath !== 'string') {
-          return { success: false, message: 'Missing dbPath' };
+        const parsed = parseAttachmentParams(params);
+        if (!parsed.ok) {
+          return { success: false, message: parsed.message };
         }
-        if (!name || typeof name !== 'string') {
-          return { success: false, message: 'Missing file name' };
-        }
-        if (!type || typeof type !== 'string') {
-          return { success: false, message: 'Missing file type' };
-        }
-
-        let bytes: Uint8Array | null = null;
-        if (data instanceof Uint8Array) {
-          bytes = data;
-        } else if (Buffer.isBuffer(data)) {
-          bytes = new Uint8Array(data);
-        } else if (data instanceof ArrayBuffer) {
-          bytes = new Uint8Array(data);
-        } else if (ArrayBuffer.isView(data)) {
-          bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-        }
-
-        if (!bytes) {
-          return { success: false, message: 'Missing file data' };
-        }
+        const { dbPath, name, type, bytes } = parsed;
 
         const root = getAttachmentRootForDb(dbPath);
-        await fs.ensureDir(root);
-
-        const safeName = sanitizeFilename(name) || 'attachment';
-        const stamp = new Date().toISOString().replace(/[-T:.Z]/g, '');
-        const filename = `${stamp}_${safeName}`;
-        const fullPath = path.join(root, filename);
-        await fs.writeFile(fullPath, Buffer.from(bytes));
+        const { fullPath, safeName } = await writeStampedAttachmentFile(
+          root,
+          name,
+          bytes
+        );
 
         const relativePath = path.relative(path.dirname(dbPath), fullPath);
         return {
@@ -566,40 +601,18 @@ export default function registerIpcMainActionListeners(main: Main) {
       params: { dbPath: string; name: string; type: string; data: unknown }
     ) => {
       return await getErrorHandledReponse(async () => {
-        const { dbPath, name, type, data } = params ?? {};
-        if (!dbPath || typeof dbPath !== 'string') {
-          return { success: false, message: 'Missing dbPath' };
+        const parsed = parseAttachmentParams(params);
+        if (!parsed.ok) {
+          return { success: false, message: parsed.message };
         }
-        if (!name || typeof name !== 'string') {
-          return { success: false, message: 'Missing file name' };
-        }
-        if (!type || typeof type !== 'string') {
-          return { success: false, message: 'Missing file type' };
-        }
-
-        let bytes: Uint8Array | null = null;
-        if (data instanceof Uint8Array) {
-          bytes = data;
-        } else if (Buffer.isBuffer(data)) {
-          bytes = new Uint8Array(data);
-        } else if (data instanceof ArrayBuffer) {
-          bytes = new Uint8Array(data);
-        } else if (ArrayBuffer.isView(data)) {
-          bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-        }
-
-        if (!bytes) {
-          return { success: false, message: 'Missing file data' };
-        }
+        const { dbPath, name, type, bytes } = parsed;
 
         const stageRoot = getAttachmentStageRootForDb(dbPath);
-        await fs.ensureDir(stageRoot);
-
-        const safeName = sanitizeFilename(name) || 'attachment';
-        const stamp = new Date().toISOString().replace(/[-T:.Z]/g, '');
-        const filename = `${stamp}_${safeName}`;
-        const fullPath = path.join(stageRoot, filename);
-        await fs.writeFile(fullPath, Buffer.from(bytes));
+        const { fullPath, safeName } = await writeStampedAttachmentFile(
+          stageRoot,
+          name,
+          bytes
+        );
 
         return {
           success: true,
