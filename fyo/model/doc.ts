@@ -85,6 +85,35 @@ function dataUrlFromBytes(type: string, bytes: Uint8Array) {
   return `data:${type || 'application/octet-stream'};base64,${base64}`;
 }
 
+/**
+ * After `load()`, Attachment columns are often still JSON strings (see
+ * `_setValuesWithoutChecks(..., false)`). After `set()` they are `{ path }` objects.
+ */
+function getFilesystemPathFromAttachmentValue(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const path = (value as { path?: string }).path;
+    return typeof path === 'string' && path.length > 0 ? path : null;
+  }
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (!s) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(s) as { path?: string };
+      const path = parsed?.path;
+      return typeof path === 'string' && path.length > 0 ? path : null;
+    } catch {
+      // not JSON
+      return null;
+    }
+  }
+  return null;
+}
+
 export class Doc extends Observable<DocValue | Doc[]> {
   /* eslint-disable @typescript-eslint/no-floating-promises */
   name?: string;
@@ -1050,9 +1079,9 @@ export class Doc extends Observable<DocValue | Doc[]> {
         const value = doc.get(field.fieldname) as unknown;
 
         if (field.fieldtype === FieldTypeEnum.Attachment) {
-          const v = value as undefined | null | { path?: string };
-          if (v?.path && typeof v.path === 'string') {
-            refs.add(v.path);
+          const p = getFilesystemPathFromAttachmentValue(value);
+          if (p) {
+            refs.add(p);
           }
           continue;
         }
@@ -1082,7 +1111,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
       }
     };
 
-    scan(this);
+    scan(toRaw(this) as Doc);
     return refs;
   }
 
@@ -1244,7 +1273,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
     await this.trigger('beforeDelete');
     // Best-effort cleanup for filesystem-backed attachments/images.
     try {
-      await this.#cleanupFileBackedFieldsBeforeDelete();
+      await this._cleanupFileBackedFieldsBeforeDelete();
     } catch {}
     await this.fyo.db.delete(this.schemaName, this.name!);
     await this.trigger('afterDelete');
@@ -1253,9 +1282,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
     this.fyo.doc.observer.trigger(`delete:${this.schemaName}`, this.name);
   }
 
-  static #attachImageFileRefPrefix = 'books-file:';
-
-  async #cleanupFileBackedFieldsBeforeDelete() {
+  async _cleanupFileBackedFieldsBeforeDelete() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ipcApi = (globalThis as any)?.ipc;
     const dbPath = (this.fyo.db as any)?.dbPath as string | undefined;
@@ -1274,9 +1301,9 @@ export class Doc extends Observable<DocValue | Doc[]> {
         const value = doc.get(fieldname) as unknown;
 
         if (fieldtype === FieldTypeEnum.Attachment) {
-          const v = value as undefined | null | { path?: string };
-          if (v?.path && typeof v.path === 'string') {
-            paths.add(v.path);
+          const p = getFilesystemPathFromAttachmentValue(value);
+          if (p) {
+            paths.add(p);
           }
           continue;
         }
@@ -1285,10 +1312,10 @@ export class Doc extends Observable<DocValue | Doc[]> {
           const v = value as string | null | undefined;
           if (
             typeof v === 'string' &&
-            v.startsWith(Doc.#attachImageFileRefPrefix) &&
-            v.length > Doc.#attachImageFileRefPrefix.length
+            v.startsWith(ATTACH_IMAGE_FILE_REF_PREFIX) &&
+            v.length > ATTACH_IMAGE_FILE_REF_PREFIX.length
           ) {
-            paths.add(v.slice(Doc.#attachImageFileRefPrefix.length));
+            paths.add(v.slice(ATTACH_IMAGE_FILE_REF_PREFIX.length));
           }
           continue;
         }
@@ -1306,7 +1333,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
       }
     };
 
-    scan(this);
+    scan(toRaw(this) as Doc);
 
     await Promise.all(
       Array.from(paths).map(async (p) => {
