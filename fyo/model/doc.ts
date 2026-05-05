@@ -914,7 +914,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
 
   async _insert() {
     this._setBaseMetaValues();
-    await this.attachments.commitStagedBeforeDbWrite();
+    const pathsCommittedBeforeDb = await this.attachments.commitStagedBeforeDbWrite();
     await this._preSync();
     await setName(this, this.fyo);
 
@@ -923,6 +923,9 @@ export class Doc extends Observable<DocValue | Doc[]> {
     try {
       data = await this.fyo.db.insert(this.schemaName, validDict);
     } catch (err) {
+      await this.attachments.recoverAfterFailedDbWrite(pathsCommittedBeforeDb, {
+        failedDuringInsert: true,
+      });
       throw await getDbSyncError(err as Error, this, this.fyo);
     }
     await this._syncValues(data);
@@ -934,13 +937,16 @@ export class Doc extends Observable<DocValue | Doc[]> {
   async _update() {
     await this._validateDbNotModified();
     this._updateModifiedMetaValues();
-    await this.attachments.commitStagedBeforeDbWrite();
+    const pathsCommittedBeforeDb = await this.attachments.commitStagedBeforeDbWrite();
     await this._preSync();
 
     const data = this.getValidDict(false, true);
     try {
       await this.fyo.db.update(this.schemaName, data);
     } catch (err) {
+      await this.attachments.recoverAfterFailedDbWrite(pathsCommittedBeforeDb, {
+        failedDuringInsert: false,
+      });
       throw await getDbSyncError(err as Error, this, this.fyo);
     }
     await this._syncValues(data);
@@ -969,54 +975,57 @@ export class Doc extends Observable<DocValue | Doc[]> {
 
   async sync(): Promise<Doc> {
     this._syncing = true;
-    await this.trigger('beforeSync');
-    let doc;
-    if (this.notInserted) {
-      doc = await this._insert();
-    } else {
-      doc = await this._update();
-    }
-    await this.attachments.flushPendingDeletesAfterSync();
-    this._notInserted = false;
-    await this.trigger('afterSync');
-    this.fyo.doc.observer.trigger(`sync:${this.schemaName}`, this.name);
+    try {
+      await this.trigger('beforeSync');
+      let doc;
+      if (this.notInserted) {
+        doc = await this._insert();
+      } else {
+        doc = await this._update();
+      }
+      await this.attachments.flushPendingDeletesAfterSync();
+      this._notInserted = false;
+      await this.trigger('afterSync');
+      this.fyo.doc.observer.trigger(`sync:${this.schemaName}`, this.name);
 
-    if (this._addDocToSyncQueue && !!this.shouldDocSyncToERPNext) {
-      const isSalesInvoice = this.schemaName === ModelNameEnum.SalesInvoice;
-      const hasERPSyncableItems = await this._hasERPSyncableItems();
+      if (this._addDocToSyncQueue && !!this.shouldDocSyncToERPNext) {
+        const isSalesInvoice = this.schemaName === ModelNameEnum.SalesInvoice;
+        const hasERPSyncableItems = await this._hasERPSyncableItems();
 
-      if (
-        hasERPSyncableItems &&
-        (!(isSalesInvoice && this.isSyncedWithErp) ||
-          (isSalesInvoice && !!this.isReturn))
-      ) {
-        if (isSalesInvoice && !this.isReturn) {
-          await this.setAndSync('isSyncedWithErp', true);
-        }
-
-        const isDocExistsInQueue = await this.fyo.db.getAll(
-          ModelNameEnum.ERPNextSyncQueue,
-          {
-            filters: {
-              referenceType: this.schemaName,
-              documentName: this.name as string,
-            },
+        if (
+          hasERPSyncableItems &&
+          (!(isSalesInvoice && this.isSyncedWithErp) ||
+            (isSalesInvoice && !!this.isReturn))
+        ) {
+          if (isSalesInvoice && !this.isReturn) {
+            await this.setAndSync('isSyncedWithErp', true);
           }
-        );
 
-        if (!isDocExistsInQueue.length) {
-          await this.fyo.doc
-            .getNewDoc(ModelNameEnum.ERPNextSyncQueue, {
-              referenceType: this.schemaName,
-              documentName: this.name,
-            })
-            .sync();
+          const isDocExistsInQueue = await this.fyo.db.getAll(
+            ModelNameEnum.ERPNextSyncQueue,
+            {
+              filters: {
+                referenceType: this.schemaName,
+                documentName: this.name as string,
+              },
+            }
+          );
+
+          if (!isDocExistsInQueue.length) {
+            await this.fyo.doc
+              .getNewDoc(ModelNameEnum.ERPNextSyncQueue, {
+                referenceType: this.schemaName,
+                documentName: this.name,
+              })
+              .sync();
+          }
         }
       }
-    }
 
-    this._syncing = false;
-    return doc;
+      return doc;
+    } finally {
+      this._syncing = false;
+    }
   }
 
   async delete() {

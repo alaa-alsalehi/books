@@ -164,8 +164,9 @@ export class AttachmentManager {
   /**
    * Before DB insert/update: move staged temp files into final attachments folder
    * and replace `books-staged:` tokens with committed paths.
+   * @returns Relative attachment paths created by this pass (for rollback if DB write fails).
    */
-  async commitStagedBeforeDbWrite() {
+  async commitStagedBeforeDbWrite(): Promise<string[]> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ipcApi = (globalThis as any)?.ipc;
     const dbPath = (this.#doc.fyo.db as any)?.dbPath as string | undefined;
@@ -175,10 +176,106 @@ export class AttachmentManager {
       !ipcApi?.desktop ||
       typeof ipcApi.attachments?.stageCommit !== 'function'
     ) {
-      return;
+      return [];
     }
 
-    await this.#commitStagedInDoc(this.#doc, ipcApi, dbPath);
+    return await this.#commitStagedInDoc(this.#doc, ipcApi, dbPath);
+  }
+
+  /**
+   * If DB insert/update fails after files were moved into `attachments/…`, delete those
+   * new files and restore in-memory state (reload from DB for updates; clear fields for failed inserts).
+   */
+  async recoverAfterFailedDbWrite(
+    committedRelativePaths: string[],
+    opts: { failedDuringInsert: boolean }
+  ) {
+    this.#pendingDeletes.clear();
+    const unique = [...new Set(committedRelativePaths.filter(Boolean))];
+    if (unique.length > 0) {
+      await this.#deleteCommittedPathsBestEffort(unique);
+    }
+    if (opts.failedDuringInsert) {
+      if (unique.length > 0) {
+        this.#clearAttachmentFieldsUsingPaths(new Set(unique));
+      }
+      this.snapshotAfterLoadOrSync();
+    } else {
+      const d = this.#doc as DocLike & { load?: () => Promise<void> };
+      if (typeof d.load === 'function') {
+        await d.load();
+      }
+    }
+  }
+
+  async #deleteCommittedPathsBestEffort(relativePaths: string[]) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipcApi = (globalThis as any)?.ipc;
+    const dbPath = (this.#doc.fyo.db as any)?.dbPath as string | undefined;
+    if (!this.#doc.fyo.isElectron || !dbPath) return;
+    if (!ipcApi?.desktop || typeof ipcApi.attachments?.delete !== 'function') {
+      return;
+    }
+    await Promise.all(
+      relativePaths.map(async (p) => {
+        try {
+          await ipcApi.attachments.delete({ dbPath, path: p });
+        } catch {
+          // best-effort
+        }
+      })
+    );
+  }
+
+  #clearAttachmentFieldsUsingPaths(paths: Set<string>) {
+    const isDocLike = (v: unknown): v is DocLike => {
+      if (!v || typeof v !== 'object') return false;
+      const anyV = v as any;
+      return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
+    };
+
+    const clearIn = (d: DocLike) => {
+      for (const field of d.schema.fields) {
+        if (field.meta) continue;
+        const fieldname = field.fieldname;
+        const value = d.get(fieldname) as unknown;
+
+        if (field.fieldtype === FieldTypeEnum.Attachment) {
+          const p = getFilesystemPathFromAttachmentValue(value);
+          if (p && paths.has(p)) {
+            d[fieldname] = null;
+          }
+          continue;
+        }
+
+        if (field.fieldtype === FieldTypeEnum.AttachImage) {
+          const v = value as string | null | undefined;
+          if (
+            typeof v === 'string' &&
+            !isBooksStagedRef(v) &&
+            v.startsWith(this.#attachImagePrefix) &&
+            v.length > this.#attachImagePrefix.length
+          ) {
+            const rel = v.slice(this.#attachImagePrefix.length);
+            if (paths.has(rel)) {
+              d[fieldname] = null;
+            }
+          }
+          continue;
+        }
+
+        if (field.fieldtype === FieldTypeEnum.Table && Array.isArray(value)) {
+          for (const row of value) {
+            const child = toRaw(row) as DocLike;
+            if (isDocLike(child)) {
+              clearIn(child);
+            }
+          }
+        }
+      }
+    };
+
+    clearIn(toRaw(this.#doc) as DocLike);
   }
 
   /**
@@ -212,7 +309,8 @@ export class AttachmentManager {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ipcApi: any,
     dbPath: string
-  ) {
+  ): Promise<string[]> {
+    const createdPaths: string[] = [];
     const isDocLike = (v: unknown): v is DocLike => {
       if (!v || typeof v !== 'object') return false;
       const anyV = v as any;
@@ -243,6 +341,7 @@ export class AttachmentManager {
                 ...v,
                 path: newPath,
               };
+              createdPaths.push(newPath);
             }
           }
         }
@@ -263,6 +362,7 @@ export class AttachmentManager {
             const newPath = res?.success ? res?.attachment?.path : undefined;
             if (newPath) {
               doc[fieldname] = `${this.#attachImagePrefix}${newPath}`;
+              createdPaths.push(newPath);
             }
           }
         }
@@ -273,11 +373,14 @@ export class AttachmentManager {
         for (const row of value) {
           const child = toRaw(row) as DocLike;
           if (isDocLike(child)) {
-            await this.#commitStagedInDoc(child, ipcApi, dbPath);
+            createdPaths.push(
+              ...(await this.#commitStagedInDoc(child, ipcApi, dbPath))
+            );
           }
         }
       }
     }
+    return createdPaths;
   }
 
   /**
