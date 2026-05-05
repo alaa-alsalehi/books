@@ -1043,7 +1043,12 @@ export class Doc extends Observable<DocValue | Doc[]> {
     // Best-effort cleanup for filesystem-backed attachments/images.
     try {
       await this.attachments.cleanupBeforeDelete();
-    } catch {}
+    } catch (err) {
+      console.error(
+        `[books] best-effort attachment cleanup failed before delete (${this.schemaName} ${this.name ?? ''})`,
+        err
+      );
+    }
     await this.fyo.db.delete(this.schemaName, this.name!);
     await this.trigger('afterDelete');
 
