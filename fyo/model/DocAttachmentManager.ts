@@ -25,6 +25,12 @@ type DocLike = {
   [key: string]: any;
 };
 
+function isDocLike(v: unknown): v is DocLike {
+  if (!v || typeof v !== 'object') return false;
+  const anyV = v as any;
+  return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
+}
+
 function getStorageMode(doc: DocLike): AttachmentStorageMode {
   return (
     ((doc.fyo.singles.SystemSettings as any)?.attachmentStorage as
@@ -229,12 +235,6 @@ export class DocAttachmentManager {
   }
 
   #clearAttachmentFieldsUsingPaths(paths: Set<string>) {
-    const isDocLike = (v: unknown): v is DocLike => {
-      if (!v || typeof v !== 'object') return false;
-      const anyV = v as any;
-      return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
-    };
-
     const clearIn = (d: DocLike) => {
       for (const field of d.schema.fields) {
         if (field.meta) continue;
@@ -312,11 +312,6 @@ export class DocAttachmentManager {
     dbPath: string
   ): Promise<string[]> {
     const createdPaths: string[] = [];
-    const isDocLike = (v: unknown): v is DocLike => {
-      if (!v || typeof v !== 'object') return false;
-      const anyV = v as any;
-      return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
-    };
 
     for (const field of doc.schema.fields) {
       if (field.meta) continue;
@@ -343,6 +338,11 @@ export class DocAttachmentManager {
                 path: newPath,
               };
               createdPaths.push(newPath);
+            } else {
+              console.error(
+                `[books] stageCommit failed for Attachment field '${fieldname}'`,
+                { stagePath: abs, response: res }
+              );
             }
           }
         }
@@ -364,6 +364,11 @@ export class DocAttachmentManager {
             if (newPath) {
               doc[fieldname] = `${this.#attachImagePrefix}${newPath}`;
               createdPaths.push(newPath);
+            } else {
+              console.error(
+                `[books] stageCommit failed for AttachImage field '${fieldname}'`,
+                { stagePath: abs, response: res }
+              );
             }
           }
         }
@@ -468,12 +473,6 @@ export class DocAttachmentManager {
     ipcApi: any,
     dbPath: string
   ) {
-    const isDocLike = (v: unknown): v is DocLike => {
-      if (!v || typeof v !== 'object') return false;
-      const anyV = v as any;
-      return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
-    };
-
     for (const field of doc.schema.fields) {
       if (field.meta) continue;
       const fieldname = field.fieldname;
@@ -580,11 +579,6 @@ export class DocAttachmentManager {
 
   #collectStagedAbsolutePaths(d: DocLike): string[] {
     const out: string[] = [];
-    const isDocLike = (v: unknown): v is DocLike => {
-      if (!v || typeof v !== 'object') return false;
-      const anyV = v as any;
-      return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
-    };
 
     const scan = (doc: DocLike) => {
       for (const field of doc.schema.fields) {
@@ -834,12 +828,6 @@ export class DocAttachmentManager {
 
   collectFilesystemRefs(): Set<string> {
     const refs = new Set<string>();
-
-    const isDocLike = (v: unknown): v is DocLike => {
-      if (!v || typeof v !== 'object') return false;
-      const anyV = v as any;
-      return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
-    };
 
     const scan = (d: DocLike) => {
       for (const field of d.schema.fields) {
