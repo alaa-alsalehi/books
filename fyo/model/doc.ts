@@ -1044,16 +1044,17 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
 
     await this.trigger('beforeDelete');
-    // Best-effort cleanup for filesystem-backed attachments/images.
+    const refs = this.attachments.extractRefsForDelete();
+    await this.fyo.db.delete(this.schemaName, this.name!);
+    // Best-effort cleanup for filesystem-backed attachments/images (after DB delete).
     try {
-      await this.attachments.cleanupBeforeDelete();
+      await this.attachments.cleanupCapturedRefsAfterDelete(refs);
     } catch (err) {
       console.error(
-        `[books] best-effort attachment cleanup failed before delete (${this.schemaName} ${this.name ?? ''})`,
+        `[books] best-effort attachment cleanup failed after delete (${this.schemaName} ${this.name ?? ''})`,
         err
       );
     }
-    await this.fyo.db.delete(this.schemaName, this.name!);
     await this.trigger('afterDelete');
 
     this.fyo.telemetry.log(Verb.Deleted, this.schemaName);

@@ -168,6 +168,49 @@ export class DocAttachmentManager {
     }
   }
 
+  extractRefsForDelete(): { committed: string[]; stagedAbs: string[] } {
+    const committed = Array.from(this.collectFilesystemRefs());
+    const stagedAbs = this.#collectStagedAbsolutePaths(this.#doc);
+    return { committed, stagedAbs };
+  }
+
+  async cleanupCapturedRefsAfterDelete(refs: {
+    committed: string[];
+    stagedAbs: string[];
+  }) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipcApi = (globalThis as any)?.ipc;
+    const dbPath = (this.#doc.fyo.db as any)?.dbPath as string | undefined;
+    if (!this.#doc.fyo.isElectron || !dbPath) return;
+
+    if (ipcApi?.desktop && typeof ipcApi.attachments?.delete === 'function') {
+      await Promise.all(
+        Array.from(new Set(refs.committed)).map(async (p) => {
+          try {
+            await ipcApi.attachments.delete({ dbPath, path: p });
+          } catch {
+            // best-effort
+          }
+        })
+      );
+    }
+
+    if (
+      ipcApi?.desktop &&
+      typeof ipcApi.attachments?.stageDelete === 'function'
+    ) {
+      await Promise.all(
+        Array.from(new Set(refs.stagedAbs)).map(async (abs) => {
+          try {
+            await ipcApi.attachments.stageDelete({ stagePath: abs });
+          } catch {
+            // best-effort
+          }
+        })
+      );
+    }
+  }
+
   /**
    * Before DB insert/update: move staged temp files into final attachments folder
    * and replace `books-staged:` tokens with committed paths.
