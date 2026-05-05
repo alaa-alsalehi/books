@@ -17,6 +17,7 @@ import { emitMainProcessError } from 'backend/helpers';
 import { Main } from 'main';
 import { DatabaseMethod } from 'utils/db/types';
 import { IPC_ACTIONS, IPC_CHANNELS } from 'utils/messages';
+import { mimeTypeFromFilename } from 'utils/mimeType';
 import { getUrlAndTokenString, sendError } from './contactMothership';
 import { getLanguageMap } from './getLanguageMap';
 import { getTemplates } from './getPrintTemplates';
@@ -560,10 +561,11 @@ export default function registerIpcMainActionListeners(main: Main) {
           ? relOrAbs
           : path.join(path.dirname(dbPath), relOrAbs);
         const buf = await fs.readFile(fullPath);
+        const name = path.basename(fullPath);
         return {
           success: true,
-          name: path.basename(fullPath),
-          type: undefined,
+          name,
+          type: mimeTypeFromFilename(name),
           data: new Uint8Array(buf),
         };
       });

@@ -6,6 +6,7 @@ import {
   encodeBooksStagedPath,
   isBooksStagedRef,
 } from 'utils/attachmentStagingRef';
+import { mimeTypeFromFilename } from 'utils/mimeType';
 import { dataUrlFromBytes } from './attachmentEncoding';
 
 type AttachmentStorageMode = 'database' | 'filesystem';
@@ -415,16 +416,6 @@ export class AttachmentManager {
     this.snapshotAfterLoadOrSync();
   }
 
-  #guessMimeFromFilename(filename: string): string {
-    const lower = filename.toLowerCase();
-    if (lower.endsWith('.png')) return 'image/png';
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-    if (lower.endsWith('.gif')) return 'image/gif';
-    if (lower.endsWith('.webp')) return 'image/webp';
-    if (lower.endsWith('.pdf')) return 'application/pdf';
-    return 'application/octet-stream';
-  }
-
   #normalizeAttachmentRow(value: unknown): {
     name?: string;
     type?: string;
@@ -500,6 +491,7 @@ export class AttachmentManager {
           success?: boolean;
           data?: Uint8Array;
           name?: string;
+          type?: string;
         };
         if (
           !readRes?.success ||
@@ -513,10 +505,11 @@ export class AttachmentManager {
           readRes.name ||
           p.split(/[/\\]/).pop() ||
           'attachment';
-        const mime =
-          (typeof v.type === 'string' && v.type.length > 0
+        const mime = (readRes.type && readRes.type.length > 0
+          ? readRes.type
+          : typeof v.type === 'string' && v.type.length > 0
             ? v.type
-            : null) ?? this.#guessMimeFromFilename(baseName);
+            : mimeTypeFromFilename(baseName));
         const stagePath = await this.#ipcStageSave(
           ipcApi,
           dbPath,
@@ -548,6 +541,7 @@ export class AttachmentManager {
           success?: boolean;
           data?: Uint8Array;
           name?: string;
+          type?: string;
         };
         if (
           !readRes?.success ||
@@ -557,7 +551,10 @@ export class AttachmentManager {
           continue;
         }
         const baseName = readRes.name || relPath.split(/[/\\]/).pop() || 'image';
-        const mime = this.#guessMimeFromFilename(baseName);
+        const mime =
+          (readRes.type && readRes.type.length > 0
+            ? readRes.type
+            : mimeTypeFromFilename(baseName));
         const stagePath = await this.#ipcStageSave(
           ipcApi,
           dbPath,
