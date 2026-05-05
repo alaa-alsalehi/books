@@ -916,9 +916,11 @@ export class Doc extends Observable<DocValue | Doc[]> {
 
   async _insert() {
     this._setBaseMetaValues();
-    const pathsCommittedBeforeDb = await this.attachments.commitStagedBeforeDbWrite();
     await this._preSync();
     await setName(this, this.fyo);
+
+    const pathsCommittedBeforeDb =
+      await this.attachments.commitStagedBeforeDbWrite();
 
     const validDict = this.getValidDict(false, true);
     let data: DocValueMap;
@@ -939,8 +941,10 @@ export class Doc extends Observable<DocValue | Doc[]> {
   async _update() {
     await this._validateDbNotModified();
     this._updateModifiedMetaValues();
-    const pathsCommittedBeforeDb = await this.attachments.commitStagedBeforeDbWrite();
     await this._preSync();
+
+    const pathsCommittedBeforeDb =
+      await this.attachments.commitStagedBeforeDbWrite();
 
     const data = this.getValidDict(false, true);
     try {
