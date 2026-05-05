@@ -73,6 +73,30 @@ export function makeAttachImageFileRef(path: string) {
   return `${ATTACH_IMAGE_FILE_REF_PREFIX}${path}`;
 }
 
+async function readAttachmentAsDataURL(params: {
+  dbPath: string;
+  path: string;
+  typeHint?: string;
+}): Promise<string | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ipcApi = typeof ipc !== 'undefined' ? (ipc as any) : undefined;
+  if (!ipcApi?.desktop || typeof ipcApi.attachments?.read !== 'function') {
+    return null;
+  }
+
+  const res = (await ipcApi.attachments.read({
+    dbPath: params.dbPath,
+    path: params.path,
+  })) as { success?: boolean; data?: Uint8Array; type?: string };
+
+  if (!res?.success || !(res.data instanceof Uint8Array)) {
+    return null;
+  }
+
+  const type = params.typeHint || res.type || 'application/octet-stream';
+  return getDataURL(type, Uint8Array.from(res.data));
+}
+
 /**
  * Resolve AttachImage stored value to a data URL for <img :src="...">.
  *
@@ -89,7 +113,7 @@ export async function resolveAttachImageSrc(
     return null;
   }
 
-  // Legacy / default: already a data URL.
+  // Staged pre-save image: `books-staged:<base64-encoded-absolute-path>`.
   if (isBooksStagedRef(value)) {
     const abs = decodeBooksStagedPath(value);
     if (!abs) {
@@ -99,22 +123,7 @@ export async function resolveAttachImageSrc(
     if (!dbPath) {
       return null;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ipcApi = typeof ipc !== 'undefined' ? (ipc as any) : undefined;
-    if (!ipcApi?.desktop || typeof ipcApi.attachments?.read !== 'function') {
-      return null;
-    }
-    const res = (await ipcApi.attachments.read({
-      dbPath,
-      path: abs,
-    })) as { success?: boolean; data?: Uint8Array };
-
-    if (!res?.success || !res.data) {
-      return null;
-    }
-
-    const type = typeHint || 'application/octet-stream';
-    return getDataURL(type, Uint8Array.from(res.data));
+    return await readAttachmentAsDataURL({ dbPath, path: abs, typeHint });
   }
 
   if (!isAttachImageFileRef(value)) {
@@ -126,21 +135,9 @@ export async function resolveAttachImageSrc(
     return null;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ipcApi = typeof ipc !== 'undefined' ? (ipc as any) : undefined;
-  if (!ipcApi?.desktop || typeof ipcApi.attachments?.read !== 'function') {
-    return null;
-  }
-
-  const res = (await ipcApi.attachments.read({
+  return await readAttachmentAsDataURL({
     dbPath,
     path: getAttachImageFileRefPath(value),
-  })) as { success?: boolean; data?: Uint8Array };
-
-  if (!res?.success || !res.data) {
-    return null;
-  }
-
-  const type = typeHint || 'application/octet-stream';
-  return getDataURL(type, Uint8Array.from(res.data));
+    typeHint,
+  });
 }
