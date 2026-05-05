@@ -562,6 +562,16 @@ export class DocAttachmentManager {
     ipcApi: any,
     dbPath: string
   ) {
+    const clearAndThrow = (
+      fieldname: string,
+      message: string,
+      extra?: unknown
+    ): never => {
+      doc[fieldname] = null;
+      console.error(`[books] duplicate attachment remap failed for '${fieldname}'`, extra);
+      throw new Error(message);
+    };
+
     for (const field of doc.schema.fields) {
       if (field.meta) continue;
       const fieldname = field.fieldname;
@@ -581,13 +591,15 @@ export class DocAttachmentManager {
           name?: string;
           type?: string;
         };
-        if (
-          !readRes?.success ||
-          !(readRes.data instanceof Uint8Array) ||
-          readRes.data.length === 0
-        ) {
-          continue;
+        const data = readRes?.data;
+        if (!readRes?.success || !(data instanceof Uint8Array) || data.length === 0) {
+          clearAndThrow(
+            fieldname,
+            `[books] Failed to duplicate attachment '${fieldname}': could not read source file`,
+            { sourcePath: p, response: readRes }
+          );
         }
+        const bytes = data as Uint8Array;
         const baseName =
           v.name ||
           readRes.name ||
@@ -603,13 +615,20 @@ export class DocAttachmentManager {
           dbPath,
           baseName,
           mime,
-          readRes.data
+          bytes
         );
-        if (!stagePath) continue;
+        if (stagePath == null) {
+          clearAndThrow(
+            fieldname,
+            `[books] Failed to duplicate attachment '${fieldname}': could not stage copied bytes`,
+            { sourcePath: p, name: baseName, type: mime }
+          );
+        }
+        const stagePathStr = stagePath as string;
         doc[fieldname] = {
           name: baseName,
           type: mime,
-          path: encodeBooksStagedPath(stagePath),
+          path: encodeBooksStagedPath(stagePathStr),
         };
         continue;
       }
@@ -631,13 +650,15 @@ export class DocAttachmentManager {
           name?: string;
           type?: string;
         };
-        if (
-          !readRes?.success ||
-          !(readRes.data instanceof Uint8Array) ||
-          readRes.data.length === 0
-        ) {
-          continue;
+        const data = readRes?.data;
+        if (!readRes?.success || !(data instanceof Uint8Array) || data.length === 0) {
+          clearAndThrow(
+            fieldname,
+            `[books] Failed to duplicate AttachImage '${fieldname}': could not read source file`,
+            { sourcePath: relPath, response: readRes }
+          );
         }
+        const bytes = data as Uint8Array;
         const baseName = readRes.name || relPath.split(/[/\\]/).pop() || 'image';
         const mime =
           (readRes.type && readRes.type.length > 0
@@ -648,10 +669,16 @@ export class DocAttachmentManager {
           dbPath,
           baseName,
           mime,
-          readRes.data
+          bytes
         );
-        if (!stagePath) continue;
-        doc[fieldname] = encodeBooksStagedPath(stagePath);
+        if (stagePath == null) {
+          clearAndThrow(
+            fieldname,
+            `[books] Failed to duplicate AttachImage '${fieldname}': could not stage copied bytes`,
+            { sourcePath: relPath, name: baseName, type: mime }
+          );
+        }
+        doc[fieldname] = encodeBooksStagedPath(stagePath as string);
         continue;
       }
 
