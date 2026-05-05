@@ -174,6 +174,7 @@ import {
   getItemVisibility,
   isLoyaltyProgramExpiredAndMaxed,
 } from 'models/helpers';
+import { resolveAttachImageSrc } from 'src/utils/attachments';
 import { ItemVisibility } from 'src/components/POS/types';
 import {
   POSItem,
@@ -757,10 +758,15 @@ export default defineComponent({
           continue;
         }
 
+        const image = await resolveAttachImageSrc(
+          item?.image as string | null | undefined,
+          this.fyo
+        );
+
         this.items.push({
           availableQty,
           name: item.name,
-          image: item?.image as string,
+          image: image ?? undefined,
           rate: item.rate as Money,
           unit: item.unit as string,
           hasBatch: !!item.hasBatch,
