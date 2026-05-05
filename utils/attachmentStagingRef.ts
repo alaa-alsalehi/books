@@ -15,12 +15,15 @@ export function encodeBooksStagedPath(absolutePath: string): string {
   if (typeof btoa === 'function') {
     return BOOKS_STAGED_PREFIX + btoa(bin);
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const B = (globalThis as any)?.Buffer;
+  const B = (globalThis as { Buffer?: typeof Buffer | undefined })?.Buffer;
   if (B) {
-    return BOOKS_STAGED_PREFIX + B.from(absolutePath, 'utf8').toString('base64');
+    return (
+      BOOKS_STAGED_PREFIX + B.from(absolutePath, 'utf8').toString('base64')
+    );
   }
-  return BOOKS_STAGED_PREFIX + bin;
+  throw new Error(
+    '[books] encodeBooksStagedPath: no base64 encoder available (missing btoa and Buffer)'
+  );
 }
 
 export function decodeBooksStagedPath(ref: string): string | null {
@@ -37,8 +40,7 @@ export function decodeBooksStagedPath(ref: string): string | null {
   } catch {
     return null;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const B = (globalThis as any)?.Buffer;
+  const B = (globalThis as { Buffer?: typeof Buffer | undefined })?.Buffer;
   if (B) {
     try {
       return B.from(b64, 'base64').toString('utf8');
