@@ -505,7 +505,7 @@ test('Duplicate Shipment, backref unset', async (t) => {
 
   t.ok(shpm.backReference, 'SHPM back ref is set');
 
-  const doc = shpm.duplicate();
+  const doc = await shpm.duplicateForEdit();
   t.notOk(doc.backReference, 'Duplicate SHPM back ref is not set');
 });
 

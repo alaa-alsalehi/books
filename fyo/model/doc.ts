@@ -1119,6 +1119,13 @@ export class Doc extends Observable<DocValue | Doc[]> {
     return await this.sync();
   }
 
+  /**
+   * Clones current field values into a new unsaved document (synchronous).
+   * For any duplicate that will be edited or saved in the app, prefer
+   * {@link Doc.duplicateForEdit} so filesystem attachments are remapped to staged
+   * copies (Electron). Use this only when you need a sync clone without IPC
+   * (e.g. some tests).
+   */
   duplicate(): Doc {
     const updateMap = this.getValidDict(true, true);
     for (const field in updateMap) {
@@ -1149,6 +1156,17 @@ export class Doc extends Observable<DocValue | Doc[]> {
     ) as RawValueMap;
 
     return this.fyo.doc.getNewDoc(this.schemaName, rawUpdateMap, true);
+  }
+
+  /**
+   * Runs {@link Doc.duplicate} (including subclass overrides), then remaps
+   * committed filesystem attachment paths to staged temp files so the copy follows
+   * the same save lifecycle as a new upload. Use for every user-facing duplicate.
+   */
+  async duplicateForEdit(): Promise<Doc> {
+    const dupe = this.duplicate();
+    await dupe.attachments.remapCommittedFilesystemAttachmentsToStagedAfterDuplicate();
+    return dupe;
   }
 
   /**

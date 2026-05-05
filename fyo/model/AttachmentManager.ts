@@ -280,6 +280,204 @@ export class AttachmentManager {
     }
   }
 
+  /**
+   * Called from `Doc.duplicateForEdit()` after `duplicate()`. Replaces committed
+   * filesystem attachment paths with staged copies so the unsaved duplicate does not
+   * share files with the source (same stage → commit-on-sync lifecycle as a new upload).
+   */
+  async remapCommittedFilesystemAttachmentsToStagedAfterDuplicate() {
+    if (getStorageMode(this.#doc) !== 'filesystem') {
+      this.snapshotAfterLoadOrSync();
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ipcApi = (globalThis as any)?.ipc;
+    const dbPath = (this.#doc.fyo.db as any)?.dbPath as string | undefined;
+    if (
+      !this.#doc.fyo.isElectron ||
+      !dbPath ||
+      !ipcApi?.desktop ||
+      typeof ipcApi.attachments?.read !== 'function' ||
+      typeof ipcApi.attachments?.stageSave !== 'function'
+    ) {
+      this.snapshotAfterLoadOrSync();
+      return;
+    }
+
+    await this.#remapDuplicateRefsInDoc(
+      toRaw(this.#doc) as DocLike,
+      ipcApi,
+      dbPath
+    );
+    this.snapshotAfterLoadOrSync();
+  }
+
+  #guessMimeFromFilename(filename: string): string {
+    const lower = filename.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    return 'application/octet-stream';
+  }
+
+  #normalizeAttachmentRow(value: unknown): {
+    name?: string;
+    type?: string;
+    path?: string;
+    data?: string;
+  } | null {
+    if (value == null) return null;
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const v = value as {
+        name?: string;
+        type?: string;
+        path?: string;
+        data?: string;
+      };
+      return {
+        name: v.name,
+        type: v.type,
+        path: v.path,
+        data: v.data,
+      };
+    }
+    if (typeof value === 'string') {
+      const s = value.trim();
+      if (!s) return null;
+      try {
+        const parsed = JSON.parse(s) as {
+          name?: string;
+          type?: string;
+          path?: string;
+          data?: string;
+        };
+        if (parsed && typeof parsed === 'object') {
+          return {
+            name: parsed.name,
+            type: parsed.type,
+            path: parsed.path,
+            data: parsed.data,
+          };
+        }
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  async #remapDuplicateRefsInDoc(
+    doc: DocLike,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcApi: any,
+    dbPath: string
+  ) {
+    const isDocLike = (v: unknown): v is DocLike => {
+      if (!v || typeof v !== 'object') return false;
+      const anyV = v as any;
+      return typeof anyV.get === 'function' && anyV.schema && anyV.schema.fields;
+    };
+
+    for (const field of doc.schema.fields) {
+      if (field.meta) continue;
+      const fieldname = field.fieldname;
+      const rawValue = doc.get(fieldname) as unknown;
+
+      if (field.fieldtype === FieldTypeEnum.Attachment) {
+        const v = this.#normalizeAttachmentRow(rawValue);
+        if (!v) continue;
+        const p = v.path;
+        if (typeof p !== 'string' || !p || isBooksStagedRef(p)) continue;
+        const readRes = (await ipcApi.attachments.read({
+          dbPath,
+          path: p,
+        })) as {
+          success?: boolean;
+          data?: Uint8Array;
+          name?: string;
+        };
+        if (
+          !readRes?.success ||
+          !(readRes.data instanceof Uint8Array) ||
+          readRes.data.length === 0
+        ) {
+          continue;
+        }
+        const baseName =
+          v.name ||
+          readRes.name ||
+          p.split(/[/\\]/).pop() ||
+          'attachment';
+        const mime =
+          (typeof v.type === 'string' && v.type.length > 0
+            ? v.type
+            : null) ?? this.#guessMimeFromFilename(baseName);
+        const stagePath = await this.#ipcStageSave(
+          ipcApi,
+          dbPath,
+          baseName,
+          mime,
+          readRes.data
+        );
+        if (!stagePath) continue;
+        doc[fieldname] = {
+          name: baseName,
+          type: mime,
+          path: encodeBooksStagedPath(stagePath),
+        };
+        continue;
+      }
+
+      if (field.fieldtype === FieldTypeEnum.AttachImage) {
+        if (typeof rawValue !== 'string') continue;
+        const s = rawValue;
+        if (!s || isBooksStagedRef(s)) continue;
+        if (s.startsWith('data:')) continue;
+        if (!s.startsWith(this.#attachImagePrefix)) continue;
+        const relPath = s.slice(this.#attachImagePrefix.length);
+        if (!relPath) continue;
+        const readRes = (await ipcApi.attachments.read({
+          dbPath,
+          path: relPath,
+        })) as {
+          success?: boolean;
+          data?: Uint8Array;
+          name?: string;
+        };
+        if (
+          !readRes?.success ||
+          !(readRes.data instanceof Uint8Array) ||
+          readRes.data.length === 0
+        ) {
+          continue;
+        }
+        const baseName = readRes.name || relPath.split(/[/\\]/).pop() || 'image';
+        const mime = this.#guessMimeFromFilename(baseName);
+        const stagePath = await this.#ipcStageSave(
+          ipcApi,
+          dbPath,
+          baseName,
+          mime,
+          readRes.data
+        );
+        if (!stagePath) continue;
+        doc[fieldname] = encodeBooksStagedPath(stagePath);
+        continue;
+      }
+
+      if (field.fieldtype === FieldTypeEnum.Table && Array.isArray(rawValue)) {
+        for (const row of rawValue) {
+          const child = toRaw(row) as DocLike;
+          if (isDocLike(child)) {
+            await this.#remapDuplicateRefsInDoc(child, ipcApi, dbPath);
+          }
+        }
+      }
+    }
+  }
+
   #collectStagedAbsolutePaths(d: DocLike): string[] {
     const out: string[] = [];
     const isDocLike = (v: unknown): v is DocLike => {
