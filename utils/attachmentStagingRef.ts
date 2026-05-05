@@ -9,16 +9,61 @@ export function isBooksStagedRef(value: string | null | undefined): boolean {
   );
 }
 
+function textEncodeUtf8(value: string): Uint8Array {
+  const E = (globalThis as { TextEncoder?: typeof TextEncoder | undefined })
+    ?.TextEncoder;
+  if (E) {
+    return new E().encode(value);
+  }
+  const B = (globalThis as { Buffer?: typeof Buffer | undefined })?.Buffer;
+  if (B) {
+    return new Uint8Array(B.from(value, 'utf8'));
+  }
+  throw new Error('[books] UTF-8 encoder unavailable (missing TextEncoder and Buffer)');
+}
+
+function textDecodeUtf8(bytes: Uint8Array): string {
+  const D = (globalThis as { TextDecoder?: typeof TextDecoder | undefined })
+    ?.TextDecoder;
+  if (D) {
+    return new D('utf-8').decode(bytes);
+  }
+  const B = (globalThis as { Buffer?: typeof Buffer | undefined })?.Buffer;
+  if (B) {
+    return B.from(bytes).toString('utf8');
+  }
+  throw new Error('[books] UTF-8 decoder unavailable (missing TextDecoder and Buffer)');
+}
+
+function bytesToBinaryString(bytes: Uint8Array): string {
+  let out = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    out += String.fromCharCode(...chunk);
+  }
+  return out;
+}
+
+function binaryStringToBytes(bin: string): Uint8Array {
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i) & 0xff;
+  }
+  return out;
+}
+
 export function encodeBooksStagedPath(absolutePath: string): string {
-  const bin = unescape(encodeURIComponent(absolutePath));
   // eslint-disable-next-line no-undef
   if (typeof btoa === 'function') {
-    return BOOKS_STAGED_PREFIX + btoa(bin);
+    const bytes = textEncodeUtf8(absolutePath);
+    return BOOKS_STAGED_PREFIX + btoa(bytesToBinaryString(bytes));
   }
   const B = (globalThis as { Buffer?: typeof Buffer | undefined })?.Buffer;
   if (B) {
     return (
-      BOOKS_STAGED_PREFIX + B.from(absolutePath, 'utf8').toString('base64')
+      BOOKS_STAGED_PREFIX +
+      B.from(textEncodeUtf8(absolutePath)).toString('base64')
     );
   }
   throw new Error(
@@ -35,7 +80,7 @@ export function decodeBooksStagedPath(ref: string): string | null {
     // eslint-disable-next-line no-undef
     if (typeof atob === 'function') {
       const bin = atob(b64);
-      return decodeURIComponent(escape(bin));
+      return textDecodeUtf8(binaryStringToBytes(bin));
     }
   } catch {
     return null;
@@ -43,7 +88,7 @@ export function decodeBooksStagedPath(ref: string): string | null {
   const B = (globalThis as { Buffer?: typeof Buffer | undefined })?.Buffer;
   if (B) {
     try {
-      return B.from(b64, 'base64').toString('utf8');
+      return textDecodeUtf8(new Uint8Array(B.from(b64, 'base64')));
     } catch {
       return null;
     }
