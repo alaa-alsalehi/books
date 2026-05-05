@@ -17,7 +17,7 @@ import { getIsNullOrUndef, getMapFromList, getRandomString } from 'utils';
 import { markRaw, reactive } from 'vue';
 import { isPesa } from '../utils/index';
 import { getDbSyncError } from './errorHelpers';
-import { AttachmentManager } from './AttachmentManager';
+import { DocAttachmentManager } from './DocAttachmentManager';
 import {
   areDocValuesEqual,
   getFormulaSequence,
@@ -80,7 +80,7 @@ export class Doc extends Observable<DocValue | Doc[]> {
   _syncing = false;
   _addDocToSyncQueue = true;
 
-  attachments: AttachmentManager;
+  attachments: DocAttachmentManager;
 
   constructor(
     schema: Schema,
@@ -98,7 +98,9 @@ export class Doc extends Observable<DocValue | Doc[]> {
     }
 
     this._setDefaults();
-    this.attachments = markRaw(new AttachmentManager(this, ATTACH_IMAGE_FILE_REF_PREFIX));
+    this.attachments = markRaw(
+      new DocAttachmentManager(this, ATTACH_IMAGE_FILE_REF_PREFIX)
+    );
     this._setValuesWithoutChecks(data, convertToDocValue);
     return reactive(this) as Doc;
   }

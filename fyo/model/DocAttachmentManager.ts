@@ -68,7 +68,7 @@ function getFilesystemPathFromAttachmentValue(value: unknown): string | null {
   return null;
 }
 
-export class AttachmentManager {
+export class DocAttachmentManager {
   readonly #doc: DocLike;
   readonly #attachImagePrefix: string;
 
