@@ -743,7 +743,8 @@ export default defineComponent({
         filters: filters,
       })) as Item[];
 
-      this.items = [] as POSItem[];
+      const posItems: POSItem[] = [];
+      const imageLoaders: Array<() => Promise<void>> = [];
       for (const item of items) {
         let availableQty = 0;
 
@@ -752,27 +753,42 @@ export default defineComponent({
         }
 
         if (!item.name) {
-          return;
+          continue;
         }
         if (hideUnavailable && filters.trackItem && availableQty <= 0) {
           continue;
         }
 
-        const image = await resolveAttachImageSrc(
-          item?.image as string | null | undefined,
-          this.fyo
-        );
-
-        this.items.push({
+        const idx = posItems.length;
+        posItems.push({
           availableQty,
           name: item.name,
-          image: image ?? undefined,
           rate: item.rate as Money,
           unit: item.unit as string,
           hasBatch: !!item.hasBatch,
           hasSerialNumber: !!item.hasSerialNumber,
         });
+
+        const imageValue = item?.image as string | null | undefined;
+        imageLoaders.push(async () => {
+          const image = await resolveAttachImageSrc(imageValue, this.fyo);
+          if (!image) return;
+          if (this.items[idx]?.name !== item.name) return;
+          this.items[idx].image = image;
+        });
       }
+
+      // Render items immediately; fill in images as they resolve.
+      this.items = posItems;
+      void Promise.all(
+        imageLoaders.map(async (run) => {
+          try {
+            await run();
+          } catch {
+            // best-effort
+          }
+        })
+      );
     },
     async selectedReturnInvoice(invoiceName: string) {
       const salesInvoiceDoc = (await this.fyo.doc.getDoc(
