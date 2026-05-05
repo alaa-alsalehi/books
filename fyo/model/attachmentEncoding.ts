@@ -1,4 +1,4 @@
-function uint8ArrayToBase64(bytes: Uint8Array) {
+function uint8ArrayToBase64(bytes: Uint8Array): string | null {
   try {
     // Browser/Electron renderer
     // eslint-disable-next-line no-undef
@@ -11,19 +11,32 @@ function uint8ArrayToBase64(bytes: Uint8Array) {
       // eslint-disable-next-line no-undef
       return btoa(binary);
     }
-  } catch {}
+  } catch (err) {
+    // best-effort; fallback to Buffer path below
+    console.warn(
+      '[books] attachment encoding failed using btoa/String.fromCharCode',
+      err
+    );
+  }
 
   // Fallback (Node-like)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const B = (globalThis as any)?.Buffer;
+  const B = (globalThis as { Buffer?: typeof Buffer | undefined })?.Buffer;
   if (B) {
-    return B.from(bytes).toString('base64');
+    try {
+      return B.from(bytes).toString('base64');
+    } catch (err) {
+      console.warn('[books] attachment encoding failed using Buffer', err);
+      return null;
+    }
   }
-  return '';
+  return null;
 }
 
-export function dataUrlFromBytes(type: string, bytes: Uint8Array) {
+export function dataUrlFromBytes(type: string, bytes: Uint8Array): string | null {
   const base64 = uint8ArrayToBase64(bytes);
+  if (!base64) {
+    return null;
+  }
   return `data:${type || 'application/octet-stream'};base64,${base64}`;
 }
 

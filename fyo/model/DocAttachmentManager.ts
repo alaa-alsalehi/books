@@ -774,7 +774,11 @@ export class DocAttachmentManager {
           }
         }
 
-        return { name: v.name, type: v.type, data: dataUrlFromBytes(v.type, v.bytes) };
+        const dataUrl = dataUrlFromBytes(v.type, v.bytes);
+        if (!dataUrl) {
+          return value;
+        }
+        return { name: v.name, type: v.type, data: dataUrl };
       }
 
       return value;
@@ -822,7 +826,7 @@ export class DocAttachmentManager {
         }
       }
 
-      return dataUrlFromBytes(v.type, v.data);
+      return dataUrlFromBytes(v.type, v.data) ?? null;
     }
 
     return value;
