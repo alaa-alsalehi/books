@@ -65,9 +65,7 @@ function isPathInsideStageRoot(stagePath: string): boolean {
   const resolved = path.resolve(stagePath);
   const prefix = path.join(tmpdir(), 'rukn-books', 'attachments-stage');
   const normalizedPrefix = path.resolve(prefix);
-  return (
-    resolved === normalizedPrefix || resolved.startsWith(normalizedPrefix + path.sep)
-  );
+  return resolved.startsWith(normalizedPrefix + path.sep);
 }
 
 type ParsedAttachmentParams =
