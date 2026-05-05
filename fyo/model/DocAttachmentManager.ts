@@ -229,7 +229,15 @@ export class DocAttachmentManager {
       return [];
     }
 
-    return await this.#commitStagedInDoc(this.#doc, ipcApi, dbPath);
+    const { createdPaths, assignments } = await this.#commitStagedInDoc(
+      this.#doc,
+      ipcApi,
+      dbPath
+    );
+    for (const apply of assignments) {
+      apply();
+    }
+    return createdPaths;
   }
 
   /**
@@ -353,8 +361,40 @@ export class DocAttachmentManager {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ipcApi: any,
     dbPath: string
-  ): Promise<string[]> {
+  ): Promise<{ createdPaths: string[]; assignments: Array<() => void> }> {
     const createdPaths: string[] = [];
+    const assignments: Array<() => void> = [];
+
+    const rollbackAndThrow = async (context: {
+      fieldname: string;
+      stagePath: string;
+      response: unknown;
+    }) => {
+      console.error('[books] stageCommit failed; rolling back committed files', {
+        ...context,
+        createdPaths,
+      });
+
+      if (ipcApi?.desktop && typeof ipcApi.attachments?.delete === 'function') {
+        await Promise.all(
+          createdPaths.map(async (p) => {
+            try {
+              await ipcApi.attachments.delete({ dbPath, path: p });
+            } catch (err) {
+              console.error('[books] rollback delete failed', { path: p, err });
+            }
+          })
+        );
+      } else {
+        console.error(
+          '[books] rollback unavailable (ipc.attachments.delete missing)'
+        );
+      }
+
+      throw new Error(
+        `[books] stageCommit failed for field '${context.fieldname}', aborting save`
+      );
+    };
 
     for (const field of doc.schema.fields) {
       if (field.meta) continue;
@@ -376,16 +416,19 @@ export class DocAttachmentManager {
             };
             const newPath = res?.success ? res?.attachment?.path : undefined;
             if (newPath) {
-              doc[fieldname] = {
-                ...v,
-                path: newPath,
-              };
+              assignments.push(() => {
+                doc[fieldname] = {
+                  ...v,
+                  path: newPath,
+                };
+              });
               createdPaths.push(newPath);
             } else {
-              console.error(
-                `[books] stageCommit failed for Attachment field '${fieldname}'`,
-                { stagePath: abs, response: res }
-              );
+              await rollbackAndThrow({
+                fieldname,
+                stagePath: abs,
+                response: res,
+              });
             }
           }
         }
@@ -405,13 +448,16 @@ export class DocAttachmentManager {
             };
             const newPath = res?.success ? res?.attachment?.path : undefined;
             if (newPath) {
-              doc[fieldname] = `${this.#attachImagePrefix}${newPath}`;
+              assignments.push(() => {
+                doc[fieldname] = `${this.#attachImagePrefix}${newPath}`;
+              });
               createdPaths.push(newPath);
             } else {
-              console.error(
-                `[books] stageCommit failed for AttachImage field '${fieldname}'`,
-                { stagePath: abs, response: res }
-              );
+              await rollbackAndThrow({
+                fieldname,
+                stagePath: abs,
+                response: res,
+              });
             }
           }
         }
@@ -422,14 +468,14 @@ export class DocAttachmentManager {
         for (const row of value) {
           const child = toRaw(row) as DocLike;
           if (isDocLike(child)) {
-            createdPaths.push(
-              ...(await this.#commitStagedInDoc(child, ipcApi, dbPath))
-            );
+            const childRes = await this.#commitStagedInDoc(child, ipcApi, dbPath);
+            createdPaths.push(...childRes.createdPaths);
+            assignments.push(...childRes.assignments);
           }
         }
       }
     }
-    return createdPaths;
+    return { createdPaths, assignments };
   }
 
   /**
