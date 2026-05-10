@@ -874,11 +874,21 @@ export default defineComponent({
     },
     async selectServerDemo(key: string) {
       this.demoPickerOpen = false;
-      const res = await ipc.getDemoDataset(key);
-      if (!res.success || !res.payload) {
+      let res;
+      try {
+        res = await ipc.getDemoDataset(key);
+      } catch (err) {
         await showDialog({
           title: this.t`Could not load demo`,
-          detail: res.message,
+          detail: err instanceof Error ? err.message : String(err),
+          type: 'error',
+        });
+        return;
+      }
+      if (!res?.success || !res.payload) {
+        await showDialog({
+          title: this.t`Could not load demo`,
+          detail: res?.message ?? this.t`Unknown error`,
           type: 'warning',
         });
         return;

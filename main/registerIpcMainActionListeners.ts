@@ -471,10 +471,18 @@ export default function registerIpcMainActionListeners(main: Main) {
       return {
         success: false,
         message: 'No subscription token',
-        datasets: [] as unknown[],
+        datasets: [],
       };
     }
-    return await listDemoDatasets(token);
+    try {
+      return await listDemoDatasets(token);
+    } catch (error) {
+      return {
+        success: false,
+        message: (error as Error).message || 'Failed to list demo datasets',
+        datasets: [],
+      };
+    }
   });
 
   ipcMain.handle(IPC_ACTIONS.GET_DEMO_DATASET, async (_, key: string) => {
