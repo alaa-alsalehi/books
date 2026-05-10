@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 
-const DEFAULT_FLOW_VALUES = [
+export const DEFAULT_FLOW_VALUES = [
   0.35, 0.25, 0.15, 0.15, 0.25, 0.05, 0.05, 0.15, 0.25, 0.35, 0.45, 0.55,
 ];
 
@@ -35,7 +35,7 @@ let activePurchaseItemPartyMap: Record<string, string> = {
   ...purchaseItemPartyMap,
 };
 
-function buildReversePurchaseMap(
+export function buildReversePurchaseMap(
   map: Record<string, string[]>
 ): Record<string, string> {
   const acc: Record<string, string> = {};
@@ -45,6 +45,36 @@ function buildReversePurchaseMap(
     }
   }
   return acc;
+}
+
+/** Resolved flow for one run (no module globals). */
+export function resolveDummyFlow(flowOverride?: number[] | null): number[] {
+  if (flowOverride && flowOverride.length === 12) {
+    return [...flowOverride];
+  }
+  return [...DEFAULT_FLOW_VALUES];
+}
+
+/** Item name → supplier party for one run (no module globals). */
+export function resolvePurchaseItemPartyLookup(
+  partyPurchaseItemMapOverride?: Record<string, string[]> | null
+): Record<string, string> {
+  if (
+    partyPurchaseItemMapOverride &&
+    Object.keys(partyPurchaseItemMapOverride).length
+  ) {
+    return buildReversePurchaseMap(partyPurchaseItemMapOverride);
+  }
+  return { ...purchaseItemPartyMap };
+}
+
+/** Seasonality factor for `months` months back, using an explicit flow array. */
+export function getFlowConstantWithFlow(
+  months: number,
+  flow: number[]
+): number {
+  const d = DateTime.now().minus({ months });
+  return flow[d.month - 1];
 }
 
 export function resetDummyHelpers(): void {
