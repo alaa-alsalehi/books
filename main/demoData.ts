@@ -23,6 +23,171 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isDemoItemSeed(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (!isNonEmptyString(value.name)) {
+    return false;
+  }
+  if (typeof value.unit !== 'string') {
+    return false;
+  }
+  if (typeof value.itemType !== 'string') {
+    return false;
+  }
+  if (typeof value.incomeAccount !== 'string') {
+    return false;
+  }
+  if (typeof value.expenseAccount !== 'string') {
+    return false;
+  }
+  if (typeof value.rate !== 'number' || Number.isNaN(value.rate)) {
+    return false;
+  }
+  if (typeof value.for !== 'string') {
+    return false;
+  }
+  if (
+    value.tax !== undefined &&
+    value.tax !== null &&
+    typeof value.tax !== 'string'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isDemoPartySeed(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (!isNonEmptyString(value.name)) {
+    return false;
+  }
+  if (typeof value.role !== 'string') {
+    return false;
+  }
+  if (typeof value.defaultAccount !== 'string') {
+    return false;
+  }
+  if (typeof value.currency !== 'string') {
+    return false;
+  }
+  return true;
+}
+
+function isPayloadOptions(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    isNonEmptyString(value.companyName) &&
+    isNonEmptyString(value.country) &&
+    isNonEmptyString(value.currency) &&
+    isNonEmptyString(value.chartOfAccounts) &&
+    isNonEmptyString(value.fiscalYearStartMD) &&
+    isNonEmptyString(value.fiscalYearEndMD)
+  );
+}
+
+function isPartyPurchaseItemMap(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  for (const k of Object.keys(value)) {
+    const row = value[k];
+    if (!Array.isArray(row)) {
+      return false;
+    }
+    for (const el of row) {
+      if (typeof el !== 'string') {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function isNumberArray(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  for (const x of value) {
+    if (typeof x !== 'number' || Number.isNaN(x)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isPeriodicPurchasesMap(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  for (const k of Object.keys(value)) {
+    const n = value[k];
+    if (typeof n !== 'number' || !Number.isFinite(n)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isDemoDatasetPayloadMessage(
+  value: unknown
+): value is DemoDatasetPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (!isNonEmptyString(value.key)) {
+    return false;
+  }
+  if (!isPayloadOptions(value.options)) {
+    return false;
+  }
+  if (!isRecord(value.address)) {
+    return false;
+  }
+  if (!isRecord(value.accounting)) {
+    return false;
+  }
+  if (!isRecord(value.printSettings)) {
+    return false;
+  }
+  if (
+    !Array.isArray(value.items) ||
+    value.items.length === 0 ||
+    !value.items.every(isDemoItemSeed)
+  ) {
+    return false;
+  }
+  if (
+    !Array.isArray(value.parties) ||
+    value.parties.length === 0 ||
+    !value.parties.every(isDemoPartySeed)
+  ) {
+    return false;
+  }
+  if (!isPartyPurchaseItemMap(value.partyPurchaseItemMap)) {
+    return false;
+  }
+  if (!isNumberArray(value.flow)) {
+    return false;
+  }
+  if (
+    value.periodicPurchases !== undefined &&
+    !isPeriodicPurchasesMap(value.periodicPurchases)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function listDemoDatasets(token: string): Promise<{
   success: boolean;
   message: string;
@@ -48,7 +213,11 @@ export async function listDemoDatasets(token: string): Promise<{
           datasets: msg.datasets as DemoDatasetListRow[],
         };
       }
-      return { success: true, message: 'OK', datasets: [] };
+      return {
+        success: false,
+        message: 'Unexpected response structure',
+        datasets: [],
+      };
     }
     return {
       success: false,
@@ -83,10 +252,18 @@ export async function getDemoDataset(
     );
     if (res.status === 200) {
       const body = (await res.json()) as { message?: unknown };
+      const msg = body.message;
+      if (isDemoDatasetPayloadMessage(msg)) {
+        return {
+          success: true,
+          message: 'OK',
+          payload: msg,
+        };
+      }
       return {
-        success: true,
-        message: 'OK',
-        payload: body.message as DemoDatasetPayload,
+        success: false,
+        message:
+          'Invalid demo dataset response: missing or malformed payload fields',
       };
     }
     return {
