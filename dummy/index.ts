@@ -134,22 +134,27 @@ export async function setupDummyInstance(
   const fyEnd = payload?.options.fiscalYearEndMD ?? '04-01';
 
   const options = payload
-    ? {
-        logo: null as string | null,
-        companyName: payload.options.companyName,
-        country: payload.options.country,
-        fullname: payload.options.fullname ?? '',
-        email: payload.options.email ?? '',
-        bankName: payload.options.bankName ?? '',
-        currency: payload.options.currency,
-        fiscalYearStart: (
-          getFiscalYear(fyStart, true) ?? new Date()
-        ).toISOString(),
-        fiscalYearEnd: (
-          getFiscalYear(fyEnd, false) ?? new Date()
-        ).toISOString(),
-        chartOfAccounts: payload.options.chartOfAccounts,
-      }
+    ? (() => {
+        const fyStartDate = getFiscalYear(fyStart, true);
+        const fyEndDate = getFiscalYear(fyEnd, false);
+        if (!fyStartDate || !fyEndDate) {
+          throw new Error(
+            `Invalid fiscal year format: start=${fyStart}, end=${fyEnd}`
+          );
+        }
+        return {
+          logo: null as string | null,
+          companyName: payload.options.companyName,
+          country: payload.options.country,
+          fullname: payload.options.fullname ?? '',
+          email: payload.options.email ?? '',
+          bankName: payload.options.bankName ?? '',
+          currency: payload.options.currency,
+          fiscalYearStart: fyStartDate.toISOString(),
+          fiscalYearEnd: fyEndDate.toISOString(),
+          chartOfAccounts: payload.options.chartOfAccounts,
+        };
+      })()
     : {
         logo: null as string | null,
         companyName: "Flo's Clothes",
