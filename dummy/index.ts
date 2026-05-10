@@ -168,12 +168,16 @@ export async function setupDummyInstance(
         chartOfAccounts: 'India - Chart of Accounts',
       };
 
+  let prevSkipTelemetryLogging = false;
+  let skipTelemetryLoggingWasOverridden = false;
   try {
     await setupInstance(dbPath, options, fyo);
     if (payload?.options.country === 'United Arab Emirates') {
       await ensureUnitedArabEmiratesDemoTaxes(fyo);
     }
+    prevSkipTelemetryLogging = fyo.store?.skipTelemetryLogging ?? false;
     fyo.store.skipTelemetryLogging = true;
+    skipTelemetryLoggingWasOverridden = true;
 
     years = Math.floor(years);
     notifier?.(fyo.t`Creating Items and Parties`, -1);
@@ -187,9 +191,11 @@ export async function setupDummyInstance(
     )) as string;
     await fyo.singles.SystemSettings?.setAndSync('hideGetStarted', true);
 
-    fyo.store.skipTelemetryLogging = false;
     return { companyName: options.companyName, instanceId };
   } finally {
+    if (skipTelemetryLoggingWasOverridden) {
+      fyo.store.skipTelemetryLogging = prevSkipTelemetryLogging;
+    }
     resetDummyHelpers();
   }
 }
