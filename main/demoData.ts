@@ -27,6 +27,59 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
+function isOptionalStringField(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
+/** Runtime check for API list_demo_datasets row shape. */
+function isDemoDatasetListRow(value: unknown): value is DemoDatasetListRow {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (!isNonEmptyString(value.name)) {
+    return false;
+  }
+  if (!isNonEmptyString(value.key)) {
+    return false;
+  }
+  if (
+    !isOptionalStringField(value.title_en) ||
+    !isOptionalStringField(value.title_ar) ||
+    !isOptionalStringField(value.description_en) ||
+    !isOptionalStringField(value.description_ar) ||
+    !isOptionalStringField(value.locale) ||
+    !isOptionalStringField(value.industry) ||
+    !isOptionalStringField(value.country) ||
+    !isOptionalStringField(value.currency)
+  ) {
+    return false;
+  }
+  if (value.preview_images !== undefined) {
+    if (!Array.isArray(value.preview_images)) {
+      return false;
+    }
+    for (const url of value.preview_images) {
+      if (typeof url !== 'string') {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function validateDemoDatasetListRows(
+  datasets: unknown[]
+): DemoDatasetListRow[] | null {
+  const out: DemoDatasetListRow[] = [];
+  for (const item of datasets) {
+    if (!isDemoDatasetListRow(item)) {
+      return null;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
 function getDemoItemSalesOrPurchasesScope(
   value: Record<string, unknown>
 ): string | null {
@@ -253,10 +306,18 @@ export async function listDemoDatasets(token: string): Promise<{
       const body = (await res.json()) as { message?: unknown };
       const msg = body.message;
       if (isRecord(msg) && Array.isArray(msg.datasets)) {
+        const datasets = validateDemoDatasetListRows(msg.datasets);
+        if (datasets === null) {
+          return {
+            success: false,
+            message: 'Invalid dataset item',
+            datasets: [],
+          };
+        }
         return {
           success: true,
           message: 'OK',
-          datasets: msg.datasets as DemoDatasetListRow[],
+          datasets,
         };
       }
       return {
