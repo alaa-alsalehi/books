@@ -80,8 +80,8 @@ export function getSetupWizardDoc(languageMap?: LanguageMap) {
 }
 
 export type DemoConfigMeta = {
-  isDemo: true;
-  demoKey?: string;
+  isDemo?: boolean;
+  demoKey?: string | null;
 };
 
 export function updateConfigFiles(fyo: Fyo, demoMeta?: DemoConfigMeta): ConfigFile {
