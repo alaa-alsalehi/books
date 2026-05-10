@@ -909,7 +909,26 @@ export default defineComponent({
         return;
       }
 
-      const listRes = await ipc.listDemoDatasets();
+      let listRes;
+      try {
+        listRes = await ipc.listDemoDatasets();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('ipc.listDemoDatasets failed', err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        /* eslint-disable prettier/prettier -- multi-line translated detail + error suffix */
+        await showDialog({
+          title: this.t`Using offline demo`,
+          detail:
+            this.t`Could not load demo list from the server. Creating the built-in sample company.` +
+            `\n${errMsg}`,
+          type: 'info',
+        });
+        /* eslint-enable prettier/prettier */
+        await this.startDummyInstanceSetup(null);
+        return;
+      }
+
       if (listRes.success && listRes.datasets?.length) {
         this.demoDatasets = listRes.datasets as DemoDatasetListRow[];
         this.demoPickerOpen = true;

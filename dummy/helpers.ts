@@ -87,8 +87,15 @@ export function applyDummyHelpersOverrides(
   partyPurchaseItemMapOverride?: Record<string, string[]> | null
 ): void {
   resetDummyHelpers();
-  if (flowOverride && flowOverride.length === 12) {
-    activeFlow = [...flowOverride];
+  if (flowOverride != null) {
+    if (flowOverride.length === 12) {
+      activeFlow = [...flowOverride];
+    } else {
+      // eslint-disable-next-line no-console -- invalid flowOverride; warn so callers see why activeFlow was not updated
+      console.warn(
+        `[applyDummyHelpersOverrides] Ignoring flowOverride (length ${flowOverride.length}, expected 12); activeFlow stays default from resetDummyHelpers().`
+      );
+    }
   }
   if (
     partyPurchaseItemMapOverride &&
