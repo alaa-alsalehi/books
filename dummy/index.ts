@@ -71,7 +71,12 @@ async function defaultReceivableAccount(fyo: Fyo): Promise<string> {
   if (await fyo.db.exists(ModelNameEnum.Account, 'Trade Receivable')) {
     return 'Trade Receivable';
   }
-  return 'Debtors';
+  const rows = (await fyo.db.getAll(ModelNameEnum.Account, {
+    fields: ['name'],
+    filters: { accountType: 'Receivable', isGroup: false },
+    limit: 1,
+  })) as { name: string }[];
+  return rows[0]?.name ?? 'Debtors';
 }
 
 async function defaultPayableAccount(fyo: Fyo): Promise<string> {
@@ -81,7 +86,12 @@ async function defaultPayableAccount(fyo: Fyo): Promise<string> {
   if (await fyo.db.exists(ModelNameEnum.Account, 'Trade Payable')) {
     return 'Trade Payable';
   }
-  return 'Creditors';
+  const rows = (await fyo.db.getAll(ModelNameEnum.Account, {
+    fields: ['name'],
+    filters: { accountType: 'Payable', isGroup: false },
+    limit: 1,
+  })) as { name: string }[];
+  return rows[0]?.name ?? 'Creditors';
 }
 
 async function defaultCashAccount(fyo: Fyo): Promise<string> {
