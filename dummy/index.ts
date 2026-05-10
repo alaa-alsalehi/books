@@ -20,13 +20,13 @@ import {
 import itemsCatalogDefault from './items.json';
 import logo from './logo';
 import partiesCatalogDefault from './parties.json';
-import type { DemoDatasetPayload } from './types';
+import type { DemoDatasetPayload, DemoItemSeed } from './types';
 
 export type { DemoDatasetPayload } from './types';
 
 type Notifier = (stage: string, percent: number) => void;
 
-type CatalogItem = typeof itemsCatalogDefault[number];
+type CatalogItem = DemoItemSeed;
 type CatalogParty = typeof partiesCatalogDefault[number];
 
 const DEFAULT_PERIODIC_PURCHASES: Record<string, number> = {
@@ -49,7 +49,8 @@ type DummyRunContext = {
 function createDummyRunContext(
   payload?: DemoDatasetPayload | null
 ): DummyRunContext {
-  const catalogItems = (payload?.items as CatalogItem[]) ?? itemsCatalogDefault;
+  const catalogItems =
+    (payload?.items as CatalogItem[]) ?? (itemsCatalogDefault as CatalogItem[]);
   const catalogParties =
     (payload?.parties as CatalogParty[]) ?? partiesCatalogDefault;
   return {
@@ -430,7 +431,9 @@ async function getSalesInvoices(
 ) {
   const invoices: SalesInvoice[] = [];
   const recvAccount = await defaultReceivableAccount(fyo);
-  const salesItems = ctx.catalogItems.filter((i) => i.for !== 'Purchases');
+  const salesItems = ctx.catalogItems.filter(
+    (i) => i.forSalesOrPurchases !== 'Purchases'
+  );
   const customers = ctx.catalogParties.filter((i) => i.role !== 'Supplier');
 
   /**
@@ -638,7 +641,9 @@ async function getNonSalesPurchaseInvoices(
   ctx: DummyRunContext
 ): Promise<PurchaseInvoice[]> {
   const payAccount = await defaultPayableAccount(fyo);
-  const purchaseItems = ctx.catalogItems.filter((i) => i.for !== 'Sales');
+  const purchaseItems = ctx.catalogItems.filter(
+    (i) => i.forSalesOrPurchases !== 'Sales'
+  );
   const itemMap = getMapFromList(purchaseItems, 'name');
   const periodic = ctx.payload?.periodicPurchases ?? DEFAULT_PERIODIC_PURCHASES;
   const invoices: SalesInvoice[] = [];
@@ -712,7 +717,12 @@ async function generateStaticEntries(fyo: Fyo, ctx: DummyRunContext) {
 
 async function generateItems(fyo: Fyo, ctx: DummyRunContext) {
   for (const raw of ctx.catalogItems) {
-    const doc = fyo.doc.getNewDoc('Item', raw, false);
+    const { forSalesOrPurchases, ...rest } = raw;
+    const doc = fyo.doc.getNewDoc(
+      'Item',
+      { ...rest, for: forSalesOrPurchases },
+      false
+    );
     await doc.sync();
   }
 }

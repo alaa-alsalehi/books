@@ -28,7 +28,7 @@ export type DemoDatasetPayload = {
   };
   printSettings: {
     color?: string;
-    displayLogo?: number | boolean;
+    displayLogo?: boolean;
   };
   items: DemoItemSeed[];
   parties: DemoPartySeed[];
@@ -47,7 +47,8 @@ export type DemoItemSeed = {
   tax?: string;
   rate: number;
   hsnCode?: string | null;
-  for: string;
+  /** Sales / Purchases / Both (maps to Item.for when syncing). */
+  forSalesOrPurchases: string;
   image?: string;
 };
 

@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import type { DemoDatasetPayload } from 'dummy/types';
+import type { DemoDatasetPayload, DemoItemSeed } from 'dummy/types';
 import {
   getErrorMessageFromResponse,
   SUBSCRIPTION_SERVER,
@@ -27,6 +27,22 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
+function getDemoItemSalesOrPurchasesScope(
+  value: Record<string, unknown>
+): string | null {
+  if (
+    typeof value.forSalesOrPurchases === 'string' &&
+    value.forSalesOrPurchases.length > 0
+  ) {
+    return value.forSalesOrPurchases;
+  }
+  // API still sends JSON key "for" from Frappe (maps to Item.for on sync).
+  if (typeof value.for === 'string' && value.for.length > 0) {
+    return value.for;
+  }
+  return null;
+}
+
 function isDemoItemSeed(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
@@ -49,7 +65,7 @@ function isDemoItemSeed(value: unknown): boolean {
   if (typeof value.rate !== 'number' || Number.isNaN(value.rate)) {
     return false;
   }
-  if (typeof value.for !== 'string') {
+  if (getDemoItemSalesOrPurchasesScope(value) === null) {
     return false;
   }
   if (
@@ -60,6 +76,36 @@ function isDemoItemSeed(value: unknown): boolean {
     return false;
   }
   return true;
+}
+
+function normalizeDemoItemSeed(raw: Record<string, unknown>): DemoItemSeed {
+  const forSalesOrPurchases = getDemoItemSalesOrPurchasesScope(raw);
+  if (forSalesOrPurchases === null) {
+    throw new Error('normalizeDemoItemSeed: missing forSalesOrPurchases');
+  }
+  const rest = { ...raw };
+  delete rest.for;
+  delete rest.forSalesOrPurchases;
+  return {
+    ...(rest as Omit<DemoItemSeed, 'forSalesOrPurchases'>),
+    forSalesOrPurchases,
+  };
+}
+
+function normalizeDemoDatasetPayload(
+  raw: Record<string, unknown>
+): DemoDatasetPayload {
+  const itemsRaw = raw.items;
+  if (!Array.isArray(itemsRaw)) {
+    throw new Error('normalizeDemoDatasetPayload: items must be an array');
+  }
+  const items = itemsRaw.map((it) => {
+    if (!isRecord(it)) {
+      throw new Error('normalizeDemoDatasetPayload: invalid item');
+    }
+    return normalizeDemoItemSeed(it);
+  });
+  return { ...(raw as DemoDatasetPayload), items };
 }
 
 function isDemoPartySeed(value: unknown): boolean {
@@ -257,7 +303,7 @@ export async function getDemoDataset(
         return {
           success: true,
           message: 'OK',
-          payload: msg,
+          payload: normalizeDemoDatasetPayload(msg as Record<string, unknown>),
         };
       }
       return {

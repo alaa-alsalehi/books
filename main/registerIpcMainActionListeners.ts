@@ -482,7 +482,14 @@ export default function registerIpcMainActionListeners(main: Main) {
     if (!token) {
       return { success: false, message: 'No subscription token' };
     }
-    return await getDemoDataset(token, key);
+    try {
+      return await getDemoDataset(token, key);
+    } catch (error) {
+      return {
+        success: false,
+        message: (error as Error).message || 'Failed to get demo dataset',
+      };
+    }
   });
 
   /**
