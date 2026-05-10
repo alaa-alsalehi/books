@@ -42,6 +42,8 @@ export enum IPC_ACTIONS {
   CLEAR_SUB_TOKEN = 'clear-sub-token',
   SYNC_DB_NOW = 'sync-db-now',
   REPORT_ISSUE = 'report-issue',
+  LIST_DEMO_DATASETS = 'list-demo-datasets',
+  GET_DEMO_DATASET = 'get-demo-dataset',
   // Database messages
   DB_CREATE = 'db-create',
   DB_CONNECT = 'db-connect',

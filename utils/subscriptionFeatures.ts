@@ -1,4 +1,5 @@
 export const SUBSCRIPTION_FEATURES = {
+  enableDemo: 'enableDemo',
   enableDiscounting: 'enableDiscounting',
   enablePriceList: 'enablePriceList',
   enableFormCustomization: 'enableFormCustomization',
@@ -16,7 +17,7 @@ export const SUBSCRIPTION_FEATURES = {
 } as const;
 
 export type SubscriptionFeatureKey =
-  (typeof SUBSCRIPTION_FEATURES)[keyof typeof SUBSCRIPTION_FEATURES];
+  typeof SUBSCRIPTION_FEATURES[keyof typeof SUBSCRIPTION_FEATURES];
 
 /**
  * Server uses snake_case keys; Books uses camelCase fieldnames.
@@ -26,6 +27,7 @@ export const SUBSCRIPTION_FEATURE_SERVER_MAP: Record<
   string,
   SubscriptionFeatureKey
 > = {
+  enable_demo: SUBSCRIPTION_FEATURES.enableDemo,
   enable_discounting: SUBSCRIPTION_FEATURES.enableDiscounting,
   enable_price_list: SUBSCRIPTION_FEATURES.enablePriceList,
   enable_form_customization: SUBSCRIPTION_FEATURES.enableFormCustomization,
@@ -42,4 +44,3 @@ export const SUBSCRIPTION_FEATURE_SERVER_MAP: Record<
   enable_pos_without_inventory:
     SUBSCRIPTION_FEATURES.enablePointOfSaleWithOutInventory,
 };
-

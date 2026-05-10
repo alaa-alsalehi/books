@@ -26,17 +26,19 @@
         </h1>
         <p class="text-gray-600 dark:text-gray-400 text-base select-none">
           {{
-            t`Create a new company or select an existing one from your computer`
+            canShowDemo && filesLoaded && !files?.length
+              ? t`Use Create Demo below to start with sample data. Saved companies appear in the list.`
+              : t`Create a new company or select an existing one from your computer`
           }}
         </p>
       </div>
 
       <hr class="dark:border-gray-800" />
 
-      <!-- New File (Blue Icon) -->
+      <!-- New File (Blue Icon): hidden when demo creation is enabled — those users start via Create Demo only -->
       <div
         data-testid="create-new-file"
-        v-if="filesLoaded && !files?.length"
+        v-if="filesLoaded && !files?.length && !canShowDemo"
         class="px-4 h-row-largest flex flex-row items-center gap-4 p-2"
         :class="
           creatingDemo
@@ -141,9 +143,9 @@
         </div>
       </div>
 
-      <!-- Create Demo (Pink Icon) -->
+      <!-- Create Demo (Pink Icon): same empty-state as New Company — only before any company file exists -->
       <div
-        v-if="false"
+        v-if="canShowDemo && filesLoaded && !files?.length"
         class="px-4 h-row-largest flex flex-row items-center gap-4 p-2"
         :class="
           creatingDemo
@@ -277,7 +279,7 @@
       >
         <LanguageSelector v-show="!creatingDemo" class="text-sm w-28" />
         <button
-          v-if="false"
+          v-if="canShowDemo && filesLoaded && !files?.length"
           class="
             text-sm
             bg-gray-100
@@ -308,6 +310,50 @@
       :percent="creationPercent"
       :message="creationMessage"
     />
+
+    <Modal :open-modal="demoPickerOpen" @closemodal="demoPickerOpen = false">
+      <div class="p-4 text-gray-900 dark:text-gray-100 w-form max-h-[420px] overflow-y-auto">
+        <h2 class="text-xl font-semibold select-none">{{ t`Choose demo` }}</h2>
+        <p class="text-sm mt-2 text-gray-600 dark:text-gray-400">
+          {{ t`Pick a sample company or use the built-in English demo.` }}
+        </p>
+        <div class="mt-4 space-y-2">
+          <button
+            v-for="d in demoDatasets"
+            :key="d.key"
+            type="button"
+            class="
+              w-full text-start p-3 rounded-md border border-gray-200
+              dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800
+            "
+            @click="selectServerDemo(d.key)"
+          >
+            <div class="font-medium dark:text-gray-200">{{ demoTitle(d) }}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">
+              {{ demoDescription(d) }}
+            </div>
+          </button>
+          <button
+            type="button"
+            class="
+              w-full text-start p-3 rounded-md border border-gray-200
+              dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800
+            "
+            @click="selectLocalDemo"
+          >
+            <div class="font-medium dark:text-gray-200">
+              {{ t`Flo's Clothes (English, offline)` }}
+            </div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t`Built-in sample company` }}
+            </div>
+          </button>
+        </div>
+        <div class="flex justify-end mt-6">
+          <Button @click="demoPickerOpen = false">{{ t`Cancel` }}</Button>
+        </div>
+      </div>
+    </Modal>
 
     <!-- Base Count Selection when Dev -->
     <Modal :open-modal="openModal" @closemodal="openModal = false">
@@ -574,6 +620,15 @@
 </template>
 <script lang="ts">
 import { setupDummyInstance } from 'dummy';
+import type { DemoDatasetPayload } from 'dummy/types';
+
+type DemoDatasetListRow = {
+  key: string;
+  title_en?: string;
+  title_ar?: string;
+  description_en?: string;
+  description_ar?: string;
+};
 import { t } from 'fyo';
 import { Verb } from 'fyo/telemetry/types';
 import { DateTime } from 'luxon';
@@ -683,6 +738,8 @@ export default defineComponent({
       erpnextPickerBaseURL: '',
       erpnextPickerToken: '',
       erpnextImportPendingTemplate: null as ERPNextImportPendingTemplate | null,
+      demoPickerOpen: false,
+      demoDatasets: [] as DemoDatasetListRow[],
     } as {
       openModal: boolean;
       erpnextImportAvailable: boolean;
@@ -702,7 +759,19 @@ export default defineComponent({
       erpnextPickerBaseURL: string;
       erpnextPickerToken: string;
       erpnextImportPendingTemplate: ERPNextImportPendingTemplate | null;
+      demoPickerOpen: boolean;
+      demoDatasets: DemoDatasetListRow[];
     };
+  },
+  computed: {
+    /** Subscription flag; UI also requires empty file list (see template). */
+    canShowDemo(): boolean {
+      const feats = this.fyo.config.get('subscriptionFeatures');
+      if (!feats || typeof feats !== 'object') {
+        return false;
+      }
+      return Reflect.get(feats, 'enableDemo') === true;
+    },
   },
   async mounted() {
     await this.setFiles();
@@ -789,14 +858,63 @@ export default defineComponent({
         ],
       });
     },
-    async createDemo() {
-      if (!fyo.store.isDevelopment) {
-        await this.startDummyInstanceSetup();
-      } else {
-        this.openModal = true;
+    demoTitle(d: DemoDatasetListRow): string {
+      const lang = String(this.fyo.config.get('language') || 'en');
+      if (lang.startsWith('ar') && d.title_ar) {
+        return d.title_ar;
       }
+      return d.title_en || d.key;
     },
-    async startDummyInstanceSetup() {
+    demoDescription(d: DemoDatasetListRow): string {
+      const lang = String(this.fyo.config.get('language') || 'en');
+      if (lang.startsWith('ar') && d.description_ar) {
+        return d.description_ar;
+      }
+      return d.description_en || '';
+    },
+    async selectServerDemo(key: string) {
+      this.demoPickerOpen = false;
+      const res = await ipc.getDemoDataset(key);
+      if (!res.success || !res.payload) {
+        await showDialog({
+          title: this.t`Could not load demo`,
+          detail: res.message,
+          type: 'warning',
+        });
+        return;
+      }
+      await this.startDummyInstanceSetup(res.payload as DemoDatasetPayload);
+    },
+    selectLocalDemo() {
+      this.demoPickerOpen = false;
+      void this.startDummyInstanceSetup(null);
+    },
+    async createDemo() {
+      if (!this.canShowDemo) {
+        await showDialog({
+          title: this.t`Demo not available`,
+          detail: this.t`Demo datasets are not enabled for your subscription.`,
+          type: 'info',
+        });
+        return;
+      }
+
+      const listRes = await ipc.listDemoDatasets();
+      if (listRes.success && listRes.datasets?.length) {
+        this.demoDatasets = listRes.datasets as DemoDatasetListRow[];
+        this.demoPickerOpen = true;
+        return;
+      }
+      await showDialog({
+        title: this.t`Using offline demo`,
+        detail:
+          listRes.message ||
+          this.t`Could not load demo list from the server. Creating the built-in sample company.`,
+        type: 'info',
+      });
+      await this.startDummyInstanceSetup(null);
+    },
+    async startDummyInstanceSetup(demoPayload?: DemoDatasetPayload | null) {
       const { filePath, canceled } = await getSavePath('demo', 'db');
       if (canceled || !filePath) {
         return;
@@ -811,10 +929,14 @@ export default defineComponent({
         (message, percent) => {
           this.creationMessage = message;
           this.creationPercent = percent;
-        }
+        },
+        demoPayload ?? undefined
       );
 
-      updateConfigFiles(fyo);
+      updateConfigFiles(fyo, {
+        isDemo: true,
+        demoKey: demoPayload?.key ?? 'flo-clothes',
+      });
       await fyo.purgeCache();
       await this.setFiles();
       this.fyo.telemetry.log(Verb.Created, 'dummy-instance');

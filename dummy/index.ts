@@ -11,60 +11,205 @@ import setupInstance from 'src/setup/setupInstance';
 import { getMapFromList, safeParseInt } from 'utils';
 import { getFiscalYear } from 'utils/misc';
 import {
-  flow,
+  applyDummyHelpersOverrides,
+  getFlowArray,
   getFlowConstant,
+  getPurchaseItemPartyMap,
   getRandomDates,
-  purchaseItemPartyMap,
+  resetDummyHelpers,
 } from './helpers';
-import items from './items.json';
+import itemsCatalogDefault from './items.json';
 import logo from './logo';
-import parties from './parties.json';
+import partiesCatalogDefault from './parties.json';
+import type { DemoDatasetPayload } from './types';
+
+export type { DemoDatasetPayload } from './types';
 
 type Notifier = (stage: string, percent: number) => void;
+
+type CatalogItem = typeof itemsCatalogDefault[number];
+type CatalogParty = typeof partiesCatalogDefault[number];
+
+const DEFAULT_PERIODIC_PURCHASES: Record<string, number> = {
+  'Marketing - Video': 2,
+  'Social Ads': 1,
+  Electricity: 1,
+  'Office Cleaning': 1,
+  'Office Rent': 1,
+};
+
+let catalogItems: CatalogItem[] = itemsCatalogDefault;
+let catalogParties: CatalogParty[] = partiesCatalogDefault;
+let activePayload: DemoDatasetPayload | null = null;
+
+async function defaultReceivableAccount(fyo: Fyo): Promise<string> {
+  if (await fyo.db.exists(ModelNameEnum.Account, 'Debtors')) {
+    return 'Debtors';
+  }
+  if (await fyo.db.exists(ModelNameEnum.Account, 'Trade Receivable')) {
+    return 'Trade Receivable';
+  }
+  return 'Debtors';
+}
+
+async function defaultPayableAccount(fyo: Fyo): Promise<string> {
+  if (await fyo.db.exists(ModelNameEnum.Account, 'Creditors')) {
+    return 'Creditors';
+  }
+  if (await fyo.db.exists(ModelNameEnum.Account, 'Trade Payable')) {
+    return 'Trade Payable';
+  }
+  return 'Creditors';
+}
+
+async function defaultCashAccount(fyo: Fyo): Promise<string> {
+  if (await fyo.db.exists(ModelNameEnum.Account, 'Cash')) {
+    return 'Cash';
+  }
+  const rows = (await fyo.db.getAll(ModelNameEnum.Account, {
+    fields: ['name'],
+    filters: { accountType: 'Cash', isGroup: false },
+    limit: 1,
+  })) as { name: string }[];
+  return rows[0]?.name ?? 'Cash';
+}
+
+async function ensureUnitedArabEmiratesDemoTaxes(fyo: Fyo) {
+  const specs = [
+    { name: 'VAT-5', rate: 5 },
+    { name: 'VAT-0', rate: 0 },
+  ];
+  for (const spec of specs) {
+    if (await fyo.db.exists(ModelNameEnum.Tax, spec.name)) {
+      continue;
+    }
+    const doc = fyo.doc.getNewDoc(
+      ModelNameEnum.Tax,
+      {
+        name: spec.name,
+        details: [{ account: 'Sales Tax Payable', rate: spec.rate }],
+      },
+      false
+    );
+    await doc.sync();
+  }
+}
 
 export async function setupDummyInstance(
   dbPath: string,
   fyo: Fyo,
   years = 1,
   baseCount = 1000,
-  notifier?: Notifier
+  notifier?: Notifier,
+  payload?: DemoDatasetPayload | null
 ) {
+  activePayload = payload ?? null;
+  catalogItems = (payload?.items as CatalogItem[]) ?? itemsCatalogDefault;
+  catalogParties =
+    (payload?.parties as CatalogParty[]) ?? partiesCatalogDefault;
+  applyDummyHelpersOverrides(payload?.flow, payload?.partyPurchaseItemMap);
+
   await fyo.purgeCache();
   notifier?.(fyo.t`Setting Up Instance`, -1);
-  const options = {
-    logo: null,
-    companyName: "Flo's Clothes",
-    country: 'India',
-    fullname: 'Lin Florentine',
-    email: 'lin@flosclothes.com',
-    bankName: 'Supreme Bank',
-    currency: 'INR',
-    fiscalYearStart: getFiscalYear('04-01', true)!.toISOString(),
-    fiscalYearEnd: getFiscalYear('04-01', false)!.toISOString(),
-    chartOfAccounts: 'India - Chart of Accounts',
-  };
-  await setupInstance(dbPath, options, fyo);
-  fyo.store.skipTelemetryLogging = true;
 
-  years = Math.floor(years);
-  notifier?.(fyo.t`Creating Items and Parties`, -1);
-  await generateStaticEntries(fyo);
-  await generateDynamicEntries(fyo, years, baseCount, notifier);
-  await setOtherSettings(fyo);
+  const fyStart = payload?.options.fiscalYearStartMD ?? '04-01';
+  const fyEnd = payload?.options.fiscalYearEndMD ?? '04-01';
 
-  const instanceId = (await fyo.getValue(
-    ModelNameEnum.SystemSettings,
-    'instanceId'
-  )) as string;
-  await fyo.singles.SystemSettings?.setAndSync('hideGetStarted', true);
+  const options = payload
+    ? {
+        logo: null as string | null,
+        companyName: payload.options.companyName,
+        country: payload.options.country,
+        fullname: payload.options.fullname ?? '',
+        email: payload.options.email ?? '',
+        bankName: payload.options.bankName ?? '',
+        currency: payload.options.currency,
+        fiscalYearStart: getFiscalYear(fyStart, true)!.toISOString(),
+        fiscalYearEnd: getFiscalYear(fyEnd, false)!.toISOString(),
+        chartOfAccounts: payload.options.chartOfAccounts,
+      }
+    : {
+        logo: null as string | null,
+        companyName: "Flo's Clothes",
+        country: 'India',
+        fullname: 'Lin Florentine',
+        email: 'lin@flosclothes.com',
+        bankName: 'Supreme Bank',
+        currency: 'INR',
+        fiscalYearStart: getFiscalYear('04-01', true)!.toISOString(),
+        fiscalYearEnd: getFiscalYear('04-01', false)!.toISOString(),
+        chartOfAccounts: 'India - Chart of Accounts',
+      };
 
-  fyo.store.skipTelemetryLogging = false;
-  return { companyName: options.companyName, instanceId };
+  try {
+    await setupInstance(dbPath, options, fyo);
+    if (payload?.options.country === 'United Arab Emirates') {
+      await ensureUnitedArabEmiratesDemoTaxes(fyo);
+    }
+    fyo.store.skipTelemetryLogging = true;
+
+    years = Math.floor(years);
+    notifier?.(fyo.t`Creating Items and Parties`, -1);
+    await generateStaticEntries(fyo);
+    await generateDynamicEntries(fyo, years, baseCount, notifier);
+    await setOtherSettings(fyo, payload ?? undefined);
+
+    const instanceId = (await fyo.getValue(
+      ModelNameEnum.SystemSettings,
+      'instanceId'
+    )) as string;
+    await fyo.singles.SystemSettings?.setAndSync('hideGetStarted', true);
+
+    fyo.store.skipTelemetryLogging = false;
+    return { companyName: options.companyName, instanceId };
+  } finally {
+    activePayload = null;
+    catalogItems = itemsCatalogDefault;
+    catalogParties = partiesCatalogDefault;
+    resetDummyHelpers();
+  }
 }
 
-async function setOtherSettings(fyo: Fyo) {
+async function setOtherSettings(fyo: Fyo, payload?: DemoDatasetPayload) {
   const doc = await fyo.doc.getDoc(ModelNameEnum.PrintSettings);
   const address = fyo.doc.getNewDoc(ModelNameEnum.Address);
+
+  if (payload?.address) {
+    const emirateOrState = payload.address.state || payload.address.city || '';
+    await address.setAndSync({
+      addressLine1: payload.address.addressLine1 ?? '',
+      city: payload.address.city ?? '',
+      state: payload.address.state ?? '',
+      pos: emirateOrState,
+      postalCode: payload.address.postalCode ?? '',
+      country: payload.address.country ?? payload.options.country,
+    });
+
+    const ps = payload.printSettings;
+    const displayLogo =
+      typeof ps.displayLogo === 'boolean'
+        ? ps.displayLogo
+        : Boolean(ps.displayLogo);
+    await doc.setAndSync({
+      color: ps.color ?? '#F687B3',
+      template: 'Business',
+      displayLogo,
+      phone: payload.accounting.phone ?? '',
+      logo,
+      address: address.name,
+    });
+
+    const acc = await fyo.doc.getDoc(ModelNameEnum.AccountingSettings);
+    const patch: Record<string, string> = {};
+    if (payload.options.country === 'India' && payload.accounting.taxId) {
+      patch.gstin = payload.accounting.taxId;
+    }
+    if (Object.keys(patch).length) {
+      await acc.setAndSync(patch);
+    }
+    return;
+  }
+
   await address.setAndSync({
     addressLine1: '1st Column, Fitzgerald Bridge',
     city: 'Pune',
@@ -118,6 +263,9 @@ async function generateDynamicEntries(
 }
 
 async function getJournalEntries(fyo: Fyo, salesInvoices: SalesInvoice[]) {
+  if (activePayload?.options.country === 'United Arab Emirates') {
+    return [];
+  }
   const entries = [];
   const amount = salesInvoices
     .map((i) => i.items!)
@@ -177,6 +325,9 @@ async function getJournalEntries(fyo: Fyo, salesInvoices: SalesInvoice[]) {
 }
 
 async function getPayments(fyo: Fyo, invoices: Invoice[]) {
+  const recvAccount = await defaultReceivableAccount(fyo);
+  const payAccount = await defaultPayableAccount(fyo);
+  const cashAccount = await defaultCashAccount(fyo);
   const payments = [];
   for (const invoice of invoices) {
     // Defaulters
@@ -192,11 +343,11 @@ async function getPayments(fyo: Fyo, invoices: Invoice[]) {
       .plus({ hours: 1 })
       .toJSDate();
     if (doc.paymentType === 'Receive') {
-      doc.account = 'Debtors';
-      doc.paymentAccount = 'Cash';
+      doc.account = recvAccount;
+      doc.paymentAccount = cashAccount;
     } else {
-      doc.account = 'Cash';
-      doc.paymentAccount = 'Creditors';
+      doc.account = cashAccount;
+      doc.paymentAccount = payAccount;
     }
     doc.amount = invoice.outstandingAmount;
 
@@ -239,8 +390,9 @@ async function getSalesInvoices(
   notifier?: Notifier
 ) {
   const invoices: SalesInvoice[] = [];
-  const salesItems = items.filter((i) => i.for !== 'Purchases');
-  const customers = parties.filter((i) => i.role !== 'Supplier');
+  const recvAccount = await defaultReceivableAccount(fyo);
+  const salesItems = catalogItems.filter((i) => i.for !== 'Purchases');
+  const customers = catalogParties.filter((i) => i.role !== 'Supplier');
 
   /**
    * Get certain number of entries for each month of the count
@@ -271,7 +423,7 @@ async function getSalesInvoices(
 
     await doc.set('party', customer!.name);
     if (!doc.account) {
-      doc.account = 'Debtors';
+      doc.account = recvAccount;
     }
     /**
      * Add `numItems` number of items to the invoice.
@@ -296,7 +448,7 @@ async function getSalesInvoices(
         quantity = Math.ceil(Math.random() * 3);
       }
 
-      let fc = flow[date.getMonth()];
+      let fc = getFlowArray()[date.getMonth()];
       if (baseCount < 500) {
         fc += 1;
       }
@@ -336,6 +488,7 @@ async function getSalesPurchaseInvoices(
   salesInvoices: SalesInvoice[]
 ): Promise<PurchaseInvoice[]> {
   const invoices = [] as PurchaseInvoice[];
+  const payAccount = await defaultPayableAccount(fyo);
   /**
    * Group all sales invoices by their YYYY-MM.
    */
@@ -395,7 +548,10 @@ async function getSalesPurchaseInvoices(
     });
 
     const supplierGrouped = Object.keys(itemGrouped).reduce((acc, item) => {
-      const supplier = purchaseItemPartyMap[item];
+      const supplier = getPurchaseItemPartyMap()[item];
+      if (!supplier) {
+        return acc;
+      }
       acc[supplier] ??= [];
       acc[supplier].push(item);
 
@@ -416,7 +572,7 @@ async function getSalesPurchaseInvoices(
 
       await doc.set('party', supplier);
       if (!doc.account) {
-        doc.account = 'Creditors';
+        doc.account = payAccount;
       }
 
       /**
@@ -439,15 +595,11 @@ async function getNonSalesPurchaseInvoices(
   fyo: Fyo,
   years: number
 ): Promise<PurchaseInvoice[]> {
-  const purchaseItems = items.filter((i) => i.for !== 'Sales');
+  const payAccount = await defaultPayableAccount(fyo);
+  const purchaseItems = catalogItems.filter((i) => i.for !== 'Sales');
   const itemMap = getMapFromList(purchaseItems, 'name');
-  const periodic: Record<string, number> = {
-    'Marketing - Video': 2,
-    'Social Ads': 1,
-    Electricity: 1,
-    'Office Cleaning': 1,
-    'Office Rent': 1,
-  };
+  const periodic =
+    activePayload?.periodicPurchases ?? DEFAULT_PERIODIC_PURCHASES;
   const invoices: SalesInvoice[] = [];
 
   for (const months of range(0, years * 12)) {
@@ -462,6 +614,16 @@ async function getNonSalesPurchaseInvoices(
         continue;
       }
 
+      const party = getPurchaseItemPartyMap()[name];
+      if (!party) {
+        continue;
+      }
+
+      const item = itemMap[name];
+      if (!item) {
+        continue;
+      }
+
       const doc = fyo.doc.getNewDoc(
         ModelNameEnum.PurchaseInvoice,
         {
@@ -470,20 +632,22 @@ async function getNonSalesPurchaseInvoices(
         false
       ) as PurchaseInvoice;
 
-      const party = purchaseItemPartyMap[name];
       await doc.set('party', party);
       if (!doc.account) {
-        doc.account = 'Creditors';
+        doc.account = payAccount;
       }
       await doc.append('items', {});
       const row = doc.items!.at(-1)!;
-      const item = itemMap[name];
 
       let quantity = 1;
       let rate = item.rate;
-      if (name === 'Social Ads') {
+      const rentLike =
+        name === 'Office Rent' ||
+        name.includes('إيجار') ||
+        (typeof name === 'string' && name.toLowerCase().includes('rent'));
+      if (item.rate < 120 && !rentLike) {
         quantity = Math.ceil(Math.random() * 200);
-      } else if (name !== 'Office Rent') {
+      } else if (!rentLike) {
         rate = rate * (Math.random() * 0.4 + 0.8);
       }
 
@@ -506,15 +670,15 @@ async function generateStaticEntries(fyo: Fyo) {
 }
 
 async function generateItems(fyo: Fyo) {
-  for (const item of items) {
-    const doc = fyo.doc.getNewDoc('Item', item, false);
+  for (const raw of catalogItems) {
+    const doc = fyo.doc.getNewDoc('Item', raw, false);
     await doc.sync();
   }
 }
 
 async function generateParties(fyo: Fyo) {
-  for (const party of parties) {
-    const doc = fyo.doc.getNewDoc('Party', party, false);
+  for (const raw of catalogParties) {
+    const doc = fyo.doc.getNewDoc('Party', raw, false);
     await doc.sync();
   }
 }

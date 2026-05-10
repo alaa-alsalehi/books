@@ -359,6 +359,27 @@ const ipc = {
     };
   },
 
+  async listDemoDatasets() {
+    return (await ipcRenderer.invoke(
+      IPC_ACTIONS.LIST_DEMO_DATASETS
+    )) as {
+      success: boolean;
+      message: string;
+      datasets: Array<Record<string, unknown>>;
+    };
+  },
+
+  async getDemoDataset(key: string) {
+    return (await ipcRenderer.invoke(
+      IPC_ACTIONS.GET_DEMO_DATASET,
+      key
+    )) as {
+      success: boolean;
+      message: string;
+      payload?: Record<string, unknown>;
+    };
+  },
+
   registerMainProcessErrorListener(listener: IPCRendererListener) {
     ipcRenderer.on(IPC_CHANNELS.LOG_MAIN_PROCESS_ERROR, listener);
   },

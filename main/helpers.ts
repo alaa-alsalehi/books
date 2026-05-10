@@ -36,14 +36,12 @@ export async function setAndGetCleanedConfigFiles() {
 
 export async function getConfigFilesWithModified(files: ConfigFile[]) {
   const filesWithModified: ConfigFilesWithModified[] = [];
-  for (const { dbPath, id, companyName, openCount } of files) {
+  for (const file of files) {
+    const { dbPath } = file;
     const { mtime } = await fs.stat(dbPath);
     filesWithModified.push({
-      id,
-      dbPath,
-      companyName,
+      ...file,
       modified: mtime.toISOString(),
-      openCount,
     });
   }
 

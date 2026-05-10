@@ -79,7 +79,12 @@ export function getSetupWizardDoc(languageMap?: LanguageMap) {
   );
 }
 
-export function updateConfigFiles(fyo: Fyo): ConfigFile {
+export type DemoConfigMeta = {
+  isDemo?: boolean;
+  demoKey?: string | null;
+};
+
+export function updateConfigFiles(fyo: Fyo, demoMeta?: DemoConfigMeta): ConfigFile {
   const configFiles = fyo.config.get('files', []) as ConfigFile[];
 
   const companyName = fyo.singles.AccountingSettings!.companyName as string;
@@ -91,11 +96,27 @@ export function updateConfigFiles(fyo: Fyo): ConfigFile {
   let newFile = { id, companyName, dbPath, openCount } as ConfigFile;
 
   if (fileIndex === -1) {
+    if (demoMeta?.isDemo) {
+      newFile.isDemo = true;
+      if (demoMeta.demoKey) {
+        newFile.demoKey = demoMeta.demoKey;
+      }
+    }
     configFiles.push(newFile);
   } else {
-    configFiles[fileIndex].companyName = companyName;
-    configFiles[fileIndex].dbPath = dbPath;
-    configFiles[fileIndex].openCount = openCount;
+    const prev = configFiles[fileIndex];
+    configFiles[fileIndex] = {
+      ...prev,
+      companyName,
+      dbPath,
+      openCount,
+    };
+    if (demoMeta?.isDemo) {
+      configFiles[fileIndex].isDemo = true;
+      if (demoMeta.demoKey) {
+        configFiles[fileIndex].demoKey = demoMeta.demoKey;
+      }
+    }
     newFile = configFiles[fileIndex];
   }
 

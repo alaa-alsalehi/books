@@ -5,7 +5,7 @@ import type { Response } from 'node-fetch';
 import { randomBytes } from 'crypto';
 import { SUBSCRIPTION_FEATURE_SERVER_MAP } from 'utils/subscriptionFeatures';
 
-const SUBSCRIPTION_SERVER =
+export const SUBSCRIPTION_SERVER =
   process.env.NODE_ENV === 'development'
     ? 'http://localhost:8001'
     : 'https://books.rukn.sh';
@@ -15,7 +15,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-async function getErrorMessageFromResponse(res: Response): Promise<string> {
+export async function getErrorMessageFromResponse(
+  res: Response
+): Promise<string> {
   try {
     const raw = await res.text();
     const t = raw.trim();

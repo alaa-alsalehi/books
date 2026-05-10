@@ -83,6 +83,10 @@ export interface ConfigFile {
   companyName: string;
   dbPath: string;
   openCount: number;
+  /** True when this file was created via Create Demo (not New Company / ERPNext import). */
+  isDemo?: boolean;
+  /** Demo persona key from subscription server, or flo-clothes for built-in offline demo. */
+  demoKey?: string;
 }
 
 export interface FyoConfig {
