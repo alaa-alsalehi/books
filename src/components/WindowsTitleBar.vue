@@ -15,12 +15,16 @@
     style="height: 28px"
   >
     <Rukn class="ms-2" />
-    <p v-if="companyName && dbPath" class="mx-auto text-sm">
+    <p
+      v-if="companyName && dbPath"
+      dir="auto"
+      class="mx-auto text-sm"
+    >
       {{ companyName }} - {{ dbPath }}
     </p>
     <div
       v-if="!isFullscreen"
-      class="absolute window-no-drag flex h-full items-center right-0"
+      class="absolute inset-y-0 end-0 window-no-drag flex items-center"
     >
       <div
         class="
